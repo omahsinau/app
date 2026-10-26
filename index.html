@@ -585,8 +585,11 @@ const stCls = { Hadir: 'b-green', Izin: 'b-blue', Sakit: 'b-yellow', Alpa: 'b-re
 const JENJANG = ['TK', 'SD', 'SMP', 'SMA'];
 const LEVEL_TENTOR = ['Mitra Tentor', 'Tentor Utama', 'Tentor Andalan', 'Master Tentor'];
 const LEVEL_COL = { 'Mitra Tentor': 'feeGuru', 'Tentor Utama': 'feeUtama', 'Tentor Andalan': 'feeAndalan', 'Master Tentor': 'feeMaster' };
-const levelOf = g => LEVEL_TENTOR.includes(g && g.jenjang) ? g.jenjang : 'Mitra Tentor';
-const levelBadge = g => { const i = LEVEL_TENTOR.indexOf(levelOf(g)); return `<span class="badge ${['b-green', 'b-blue', 'b-purple', 'b-ink'][i]}">${'★'.repeat(i + 1)} ${esc(levelOf(g))}</span>`; };
+/* jenjang tentor: nama bisa diubah owner (Pengaturan jenjangTentor, urutan = tingkat) */
+const levels = () => { const l = String((S.settings || {}).jenjangTentor || '').split('\n').map(x => x.trim()).filter(Boolean); return l.length ? l : LEVEL_TENTOR; };
+const levelOf = g => (g && String(g.jenjang || '').trim()) || levels()[0];
+const levelIdx = g => Math.max(0, levels().indexOf(levelOf(g)));
+const levelBadge = g => { const i = levelIdx(g); return `<span class="badge ${['b-green', 'b-blue', 'b-purple', 'b-ink', 'b-orange', 'b-pink'][i % 6]}">${'★'.repeat(Math.min(i + 1, 5))} ${esc(levelOf(g))}</span>`; };
 const KATEGORI = ['Klasikal', 'Klasikal Khusus', 'Privat', 'Privat Home', 'Home Visit', 'Transport', 'Lainnya'];
 const TIPE_KELAS = ['Klasikal', 'Rombel', 'Privat Bimbel', 'Privat Rumah', 'Privat Bimbel Khusus', 'Home Visit'];
 const METODE_GAJI = ['DANA', 'BRI', 'Mandiri', 'BNI', 'BCA', 'BSI', 'BTN', 'ShopeePay', 'Cash', 'Lain-lain'];
@@ -612,6 +615,10 @@ const lembagaPendek = st => String(st.namaLembaga || '').replace(/^Bimbingan Bel
 
 /* sesi = kumpulan baris kehadiran dengan guru+tanggal+jam yang sama */
 const sesiKey = r => `${r.guruId}|${r.tanggal}|${r.jam || ''}`;
+/* jadwal: mingguan (hari) atau tanggal tertentu (tanggal) */
+const isDated = j => !!(j && j.tanggal);
+const jadwalOn = (list, d) => (list || []).filter(j => j.tanggal ? j.tanggal === d : j.hari === dayName(d));
+const jadwalWhen = j => j.tanggal ? `${fmtDate(j.tanggal)} (${dayName(j.tanggal).slice(0, 3)})` : j.hari;
 function groupSesi(rows) {
   const m = {};
   rows.forEach(r => { const k = sesiKey(r); (m[k] = m[k] || { key: k, guruId: r.guruId, tanggal: r.tanggal, jam: r.jam || '', siswa: [] }).siswa.push(r.siswaId); });
@@ -927,8 +934,8 @@ async function init() {
 
 /* ---------------- MODE DEMO: tiruan backend Apps Script di browser ---------------- */
 const Mock = (() => {
-  const KEY = 'osin_demo_db_v5';
-  const TABLES = ['Paket', 'Siswa', 'Guru', 'Jadwal', 'Absensi', 'Perkembangan', 'SPP', 'Gaji', 'Raport', 'Keuangan', 'PendaftarTentor'];
+  const KEY = 'osin_demo_db_v6';
+  const TABLES = ['Paket', 'Siswa', 'Guru', 'Jadwal', 'Absensi', 'Perkembangan', 'SPP', 'Gaji', 'Raport', 'Keuangan', 'PendaftarTentor', 'FeeTentor'];
   const AKD = ['Siswa', 'Guru', 'Jadwal', 'Absensi', 'Perkembangan', 'Raport'];
   const ACCESS = { owner: { read: TABLES.concat(['Materi']), write: TABLES }, akademik: { read: ['Paket'].concat(AKD, ['Materi']), write: AKD }, admin2: { read: ['Paket'].concat(AKD, ['SPP', 'Materi']), write: AKD.concat(['SPP']) } };
   const PRIV = ['tarifPaket', 'metodeBayar', 'noRekening', 'atasNama', 'jenjang'];
@@ -967,11 +974,13 @@ const Mock = (() => {
       { id: 'J8', hari: 'Senin', jamMulai: '18:30', jamSelesai: '20:00', tipe: 'Privat Bimbel', guruId: 'T6', siswaIds: 'S10', lokasi: 'Patebon', catatan: '' }
     ];
     if (!Jadwal.some(j => j.guruId === 'T1' && j.hari === todayH)) Jadwal.push({ id: 'J9', hari: todayH, jamMulai: '16:00', jamSelesai: '17:30', tipe: 'Klasikal', guruId: 'T1', siswaIds: 'S1,S2,S3', lokasi: 'Jabal', catatan: '' });
+    // jadwal per tanggal (contoh: SMP per mapel)
+    [2, 5, 9].forEach((n, i) => { const dt = new Date(); dt.setDate(dt.getDate() + n); Jadwal.push({ id: 'J' + (20 + i), hari: HARI[dt.getDay()], jamMulai: '19:00', jamSelesai: '20:00', tipe: 'Rombel', guruId: ['T2', 'T3', 'T2'][i], siswaIds: 'S6,S8', lokasi: 'Citran', catatan: '', tanggal: dstr(dt), mapel: ['Matematika', 'Bahasa Inggris', 'IPA'][i] }); });
     const Absensi = [];
     const durJ = j => { const t = x => { const [h, m] = x.split(':').map(Number); return h * 60 + m; }; return Math.round((t(j.jamSelesai) - t(j.jamMulai)) / 30) / 2 || 1; };
     for (let d = 1; d <= 70; d++) {
       const tg = ago(d), hari = HARI[new Date(tg + 'T12:00').getDay()];
-      Jadwal.filter(j => j.hari === hari).forEach(j => j.siswaIds.split(',').forEach((sid, k) => {
+      Jadwal.filter(j => !j.tanggal && j.hari === hari).forEach(j => j.siswaIds.split(',').forEach((sid, k) => {
         const s = Siswa.find(x => x.id === sid); if (!s || tg < s.tglMulai) return;
         if ((d + k * 3) % 9 === 0) return;
         Absensi.push({ id: uid('AB'), tanggal: tg, siswaId: sid, status: 'Hadir', guruId: j.guruId, catatan: '', jam: j.jamMulai, jadwalId: j.id, durasi: String(durJ(j)) });
@@ -1028,12 +1037,13 @@ const Mock = (() => {
       ['Sistem Pencernaan Manusia', 'Materi', 'SMP', '8', 'IPA', 'Video pembelajaran.', 'T5', 'Nurul', 'guru', 2]];
     return M.map((m, i) => ({ id: 'MT' + (i + 1), tanggal: ago(m[9]), judul: m[0], jenis: m[1], jenjang: m[2], kelas: m[3], mapel: m[4], deskripsi: m[5], fileId: '', url: i === 5 ? 'https://www.youtube.com/results?search_query=sistem+pencernaan+manusia' : txt(m[0] + '\n\n(contoh file mode demo)'), namaFile: i === 5 ? '' : m[0].replace(/[^\w]+/g, '-').toLowerCase() + '.txt', mime: i === 5 ? '' : 'text/plain', ukuran: i === 5 ? '' : '2048', oleh: m[6], olehNama: m[7], olehTipe: m[8] }));
   }
-  function db() { if (!mem) { mem = store.get(KEY) || seed(); if (!mem.Materi) mem.Materi = seedMateri(); if (!mem.Pengaturan.mapelList) mem.Pengaturan.mapelList = MAPEL_DEFAULT.join('\n'); if (!mem.Pengaturan.settingsRev) Object.assign(mem.Pengaturan, { jatuhTempo: '15', jatuhTempoAkhir: '27', tagihAkhirMulai: '25', waAdmin: '088215495015', waAkademik: '0882005261316', tglGajiGuru: '30', linkLatihanSoal: 'https://drive.google.com/drive/folders/1ryer_PRoBDX5XWaXROYnDuyTP29o4ZqZ', rekening: 'BRI 590701021278530 a.n. Risca Dian P\nMandiri 1350016883355 a.n. M Saifuddin\nBTN 11701500208080 a.n. M Saifuddin\nDANA 081227206753', settingsRev: '2' }); save(); } return mem; }
+  const seedFee = () => FEE_STD.map((f, i) => ({ id: 'F' + (i + 1), jenis: f[0], anak: f[1], jenjang: f[2], durasi: String(f[3]), fee: String(f[4]), transport: String(f[5]), urut: String(i + 1), feeLv: '', guruId: '' })).concat([{ id: 'F40', jenis: 'Klasikal', anak: '3-4', jenjang: 'TK & SD', durasi: '1', fee: '27000', transport: '', urut: '1', feeLv: '', guruId: 'T2' }]);
+  function db() { if (!mem) { mem = store.get(KEY) || seed(); if (!mem.Materi) mem.Materi = seedMateri(); if (!mem.FeeTentor) mem.FeeTentor = seedFee(); if (!mem.Pengaturan.jenjangTentor) mem.Pengaturan.jenjangTentor = LEVEL_TENTOR.join('\n'); if (!mem.Pengaturan.mapelList) mem.Pengaturan.mapelList = MAPEL_DEFAULT.join('\n'); if (!mem.Pengaturan.settingsRev) Object.assign(mem.Pengaturan, { jatuhTempo: '15', jatuhTempoAkhir: '27', tagihAkhirMulai: '25', waAdmin: '088215495015', waAkademik: '0882005261316', tglGajiGuru: '30', linkLatihanSoal: 'https://drive.google.com/drive/folders/1ryer_PRoBDX5XWaXROYnDuyTP29o4ZqZ', rekening: 'BRI 590701021278530 a.n. Risca Dian P\nMandiri 1350016883355 a.n. M Saifuddin\nBTN 11701500208080 a.n. M Saifuddin\nDANA 081227206753', settingsRev: '2' }); save(); } return mem; }
   function save() { store.set(KEY, mem); }
   function sess(t) { return sessions[t] || (store.get('osin_demo_sess') || {})[t]; }
   function newId(t, rows) {
     const seq = (pre, dg) => { const m = Math.max(0, ...rows.map(r => +(String(r.id).match(new RegExp('^' + pre + '(\\d+)$')) || [0, 0])[1])); return pre + String(m + 1).padStart(dg, '0'); };
-    if (t === 'Siswa') return seq('OS', 3); if (t === 'Guru') return seq('G', 2); if (t === 'Paket') return seq('P', 2);
+    if (t === 'Siswa') return seq('S', 0); if (t === 'Guru') return seq('T', 0); if (t === 'Paket') return seq('P', 0); if (t === 'FeeTentor') return seq('F', 0); if (t === 'Jadwal') return seq('J', 0);
     return uid(t.slice(0, 2).toUpperCase());
   }
   function nextNo(r) {
@@ -1290,11 +1300,52 @@ async function removeRow(t, id) { await call('remove', { table: t, id }); S.db[t
 const loginChip = (id, pass, lbl) => `<span class="login-chip"><span>ID</span><b>${esc(id)}</b><span>${lbl}</span><b>${esc(pass || '-')}</b></span>`;
 const optList = (arr, v) => arr.map(x => { const [val, lab] = Array.isArray(x) ? x : [x, x]; return `<option value="${esc(val)}" ${String(v) === String(val) ? 'selected' : ''}>${esc(lab)}</option>`; }).join('');
 
-/* fee guru per paket: tarif khusus guru (bila diisi) atau fee default paket */
-function feeMap(g) { return pj(g.tarifPaket, {}) || {}; }
-/* fee paket untuk jenjang tentor; kolom jenjang kosong → pakai fee Mitra Tentor */
-function feeLevel(paket, lv) { if (!paket) return 0; const v = paket[LEVEL_COL[lv] || 'feeGuru']; return (v !== undefined && v !== '' && +v) ? +v : (+paket.feeGuru || 0); }
-function feeFor(g, paket) { if (!paket) return 0; const m = feeMap(g); return (m[paket.id] !== undefined && m[paket.id] !== '') ? (+m[paket.id] || 0) : feeLevel(paket, levelOf(g)); }
+/* ================= FEE TENTOR (terpisah dari paket ortu) =================
+   Tabel FeeTentor: jenis (Klasikal / Privat / Privat Bimbel / Home Visit) × jumlah anak × jenjang siswa × durasi → fee + transport.
+   guruId kosong = fee standar (feeLv = fee per jenjang tentor {indeks: fee}); guruId diisi = fee khusus tentor itu (didahulukan). */
+const FEE_JENIS = ['Klasikal', 'Privat', 'Privat Bimbel', 'Home Visit'];
+const JJ_ORDER = ['TK', 'SD', 'SMP', 'SMA'];
+const byUrut = (a, b) => (+a.urut || 0) - (+b.urut || 0);
+const feeRows = (gid = '') => D('FeeTentor').filter(r => (r.guruId || '') === gid).sort(byUrut);
+const feeById = id => D('FeeTentor').find(r => r.id === id);
+const jjSet = s => new Set(String(s || '').toUpperCase().replace(/\bDAN\b/g, ' ').split(/[\s&\/,+]+/).filter(x => JJ_ORDER.includes(x)));
+const anakRange = a => { const m = String(a || '').match(/(\d+)\s*(?:-\s*(\d+))?/); return m ? [+m[1], +(m[2] || m[1])] : null; };
+const feeRowLabel = r => r ? [r.jenis, r.anak ? String(r.anak).replace(/\s*anak$/i, '') + ' anak' : '', r.jenjang, +r.durasi && +r.durasi !== 1 ? fmtJam(+r.durasi) + ' jam' : ''].filter(Boolean).join(' · ') : '';
+const feeLvMap = r => pj(r && r.feeLv, {}) || {};
+function feeBase(r, i) { if (!r) return 0; const v = feeLvMap(r)[i]; return i > 0 && v !== undefined && v !== '' ? (+v || 0) : (+r.fee || 0); }
+function feeOfRow(g, r) { if (!r) return 0; return r.guruId ? (+r.fee || 0) : feeBase(r, levelIdx(g)); }
+const nKhusus = g => D('FeeTentor').filter(r => r.guruId === (g && g.id)).length;
+/* jenis sesi dari tipe jadwal (atau paket anak bila sesi tambahan) + jumlah & jenjang anak yang hadir */
+function jenisSesi(kids, j) {
+  const tipe = String((j && j.tipe) || ''), kat = kids.map(k => (paketById(k.paketId) || {}).kategori || '');
+  let jenis = /klasikal|rombel/i.test(tipe) ? 'Klasikal' : /home/i.test(tipe) ? 'Home Visit' : /rumah/i.test(tipe) ? 'Privat' : /privat/i.test(tipe) ? 'Privat Bimbel' : '';
+  if (!jenis) jenis = kat.includes('Home Visit') ? 'Home Visit' : kat.includes('Privat Home') ? 'Privat' : kat.some(k => /^Privat/.test(k)) ? 'Privat Bimbel' : 'Klasikal';
+  const jj = [...new Set(kids.map(k => k.jenjang).filter(x => JJ_ORDER.includes(x)))].sort((a, b) => JJ_ORDER.indexOf(a) - JJ_ORDER.indexOf(b));
+  return { jenis, n: kids.length, jj: jj.length ? jj : ['SD'], top: jj[jj.length - 1] || 'SD' };
+}
+/* pilih baris: jumlah anak masuk rentang (bila tidak ada → rentang terbesar di bawahnya), jenjang = rentang terkecil yang mencakup semua anak */
+function pickRows(rows, info) {
+  let c = rows.filter(r => { const g = anakRange(r.anak); return g && info.n >= g[0] && info.n <= g[1]; });
+  if (!c.length) c = rows.filter(r => !anakRange(r.anak));
+  if (!c.length) { const below = rows.filter(r => anakRange(r.anak) && anakRange(r.anak)[1] < info.n), mx = Math.max(-1, ...below.map(r => anakRange(r.anak)[1])); c = below.filter(r => anakRange(r.anak)[1] === mx); }
+  const tryJ = set => { const ok = c.filter(r => { const rs = jjSet(r.jenjang); return !rs.size || [...set].every(x => rs.has(x)); }); if (!ok.length) return null; const sz = r => jjSet(r.jenjang).size || 99, m = Math.min(...ok.map(sz)); return ok.filter(r => sz(r) === m); };
+  return tryJ(new Set(info.jj)) || tryJ(new Set(info.jj.map(x => x === 'TK' ? 'SD' : x === 'SMA' ? 'SMP' : x))) || tryJ(new Set([info.top])) || [];
+}
+/* cari fee; fee khusus tentor didahulukan. Durasi persis (mis. home visit 1,5 jam) = fee baris itu, selain itu fee 1 jam × durasi */
+function findFee(info, dur, g) {
+  const srcs = [g && g.id ? feeRows(g.id) : [], feeRows('')];
+  for (const src of srcs) {
+    for (const jenis of info.jenis === 'Home Visit' && info.n <= 1 ? ['Home Visit', 'Privat'] : [info.jenis]) {
+      const c = pickRows(src.filter(r => r.jenis === jenis), info);
+      if (!c.length) continue;
+      const ex = c.find(r => Math.abs((+r.durasi || 1) - dur) < 0.01);
+      if (ex) return { row: ex, mult: 1, exact: (+ex.durasi || 1) !== 1 };
+      const one = c.find(r => (+r.durasi || 1) === 1) || c[0];
+      return { row: one, mult: dur / (+one.durasi || 1) };
+    }
+  }
+  return { row: null, mult: dur };
+}
 
 /* ---------- shell ---------- */
 function renderAdmin() {
@@ -1351,7 +1402,7 @@ function pgDashboard() {
   const unpaid = canPay() ? unpaidFor(p) : [];
   const masuk = canPay() ? D('SPP').filter(x => String(x.tanggalBayar).startsWith(p)) : [];
   const absToday = D('Absensi').filter(a => a.tanggal === today), sesiToday = groupSesi(absToday);
-  const jadwal = D('Jadwal').filter(j => j.hari === hari).sort((a, b) => a.jamMulai.localeCompare(b.jamMulai));
+  const jadwal = jadwalOn(D('Jadwal'), today).sort((a, b) => a.jamMulai.localeCompare(b.jamMulai));
   const prev = addMonths(p, -1);
   const rpPrev = D('Raport').filter(r => r.periode === prev && !isSem(r));
   const sisPrev = new Set(D('Absensi').filter(a => String(a.tanggal).startsWith(prev)).map(a => a.siswaId)).size;
@@ -1380,7 +1431,7 @@ function pgDashboard() {
   ${daftar.length ? `<div class="card bg-blue" style="box-shadow:var(--sh-sm)"><div class="row"><b style="flex:1">📝 ${daftar.length} pendaftar murid baru menunggu aktivasi.</b><button class="btn sm yellow" onclick="S.f.siswaSt='Baru';go('siswa')">Lihat pendaftar</button></div></div>` : ''}
   ${isOwner() && tBaru.length ? `<div class="card bg-purple" style="box-shadow:var(--sh-sm)"><div class="row"><b style="flex:1">🎓 ${tBaru.length} pendaftar tentor baru menunggu review.</b><button class="btn sm yellow" onclick="go('rekrut')">Review</button></div></div>` : ''}
   ${noPaket ? `<div class="card bg-orange" style="box-shadow:var(--sh-sm)"><div class="row"><b style="flex:1">⚠️ ${noPaket} siswa aktif belum diisi paket belajarnya — tagihan & gaji guru belum bisa dihitung.</b><button class="btn sm yellow" onclick="go('siswa')">Lengkapi</button></div></div>` : ''}
-  ${isOwner() && !sum(D('Paket'), x => x.feeGuru) ? `<div class="card bg-yellow" style="box-shadow:var(--sh-sm)"><div class="row"><b style="flex:1">✦ Harga paket & fee guru masih Rp0. Isi dulu di menu Paket & Fee Tentor.</b><button class="btn sm" onclick="go('paket')">Isi sekarang</button></div></div>` : ''}
+  ${isOwner() && !D('FeeTentor').length ? `<div class="card bg-yellow" style="box-shadow:var(--sh-sm)"><div class="row"><b style="flex:1">✦ Tabel fee tentor masih kosong. Isi dulu di menu Paket & Fee Tentor → Fee Tentor.</b><button class="btn sm" onclick="go('paket')">Isi sekarang</button></div></div>` : ''}
   <div class="grid g2">
     ${canPay() ? `<div class="card"><div class="card-head"><h3>Belum bayar — ${fmtPeriod(p)}</h3><div class="spacer"></div><button class="btn sm ghost" onclick="S.tab.spp='tagihan';S.f.sppFilter='belum';go('spp')">Lihat semua</button></div>
       ${unpaid.length ? unpaid.slice(0, 6).map(s => `<div class="li"><div class="avatar" style="background:var(--red-50)">${initials(s.nama)}</div><div class="meta"><b>${esc(s.nama)}</b><span class="small muted">${esc(s.ortu || '-')}${isOwner() ? ' · ' + rp(billOf(s, p).sisa) : ''} · tempo ${fmtDate(dueDateOf(waktuOf(s), p, S.settings))}</span></div>
@@ -1408,11 +1459,11 @@ function pgDashboard() {
 /* pengingat jadwal via WA (siswa & ortu) */
 function nextDateOf(hari) { const d = new Date(); for (let i = 0; i < 7; i++) { const x = new Date(d); x.setDate(d.getDate() + i); if (HARI[x.getDay()] === hari) return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`; } return todayStr(); }
 function ingatkanJadwal(jid) {
-  const j = D('Jadwal').find(x => x.id === jid), tgl = nextDateOf(j.hari), g = guruById(j.guruId), st = S.settings;
+  const j = D('Jadwal').find(x => x.id === jid), tgl = j.tanggal || nextDateOf(j.hari), g = guruById(j.guruId), st = S.settings;
   const msg = s => `Assalamu'alaikum${s ? ' ' + (s.panggilan || s.nama) : ''} 👋\n\nPengingat jadwal les *${st.namaLembaga}*:\n📅 ${dayName(tgl)}, ${fmtDateLong(tgl)}\n⏰ ${j.jamMulai}–${j.jamSelesai}\n👩‍🏫 ${g.nama}${j.lokasi ? '\n📍 ' + j.lokasi : ''}\n\nSampai jumpa & semangat belajar! 📚`;
   window.__msgJ = msg;
   const ids = (j.siswaIds || '').split(',').map(x => x.trim()).filter(Boolean);
-  modal(`Ingatkan jadwal — ${esc(j.hari)} ${esc(j.jamMulai)}`, `<p class="small muted" style="margin-bottom:10px">Klik tombol WA untuk mengirim pengingat jadwal (${dayName(tgl)}, ${fmtDate(tgl)}). Tombol berubah ✓ setelah diklik.</p>
+  modal(`Ingatkan jadwal — ${esc(jadwalWhen(j))} ${esc(j.jamMulai)}`, `<p class="small muted" style="margin-bottom:10px">Klik tombol WA untuk mengirim pengingat jadwal (${dayName(tgl)}, ${fmtDate(tgl)}). Tombol berubah ✓ setelah diklik.</p>
     ${ids.map(id => { const s = siswaById(id); return `<div class="li"><div class="meta"><b>${esc(s.nama)}</b><span class="small muted">Ortu: ${esc(s.waOrtu || '-')} · Siswa: ${esc(s.waSiswa || '-')}</span></div>
       <button class="btn sm wa" onclick="openWa('${esc(s.waOrtu || '')}',__msgJ(siswaById('${id}')));this.textContent='✓ Ortu'">${ic('wa')} Ortu</button>${s.waSiswa ? `<button class="btn sm wa" onclick="openWa('${esc(s.waSiswa)}',__msgJ(siswaById('${id}')));this.textContent='✓ Siswa'">${ic('wa')} Siswa</button>` : ''}</div>`; }).join('') || '<div class="empty">Belum ada siswa di jadwal ini</div>'}
     <div class="li"><div class="meta"><b>Guru: ${esc(g.nama)}</b><span class="small muted">${esc(g.wa || '-')}</span></div><button class="btn sm ghost" onclick="openWa('${esc(g.wa || '')}',__msgJ(null));this.textContent='✓ Guru'">${ic('wa')} Guru</button></div>`);
@@ -1555,38 +1606,33 @@ function waAkses(id) {
 /* ================= PAKET & FEE GURU ================= */
 function pgPaket() {
   const t = S.tab.pk || 'paket';
-  return tabs('pk', [['paket', 'Paket & Fee per Jenjang'], ['fee', 'Jenjang & Fee Khusus Tentor']], 'paket') + (t === 'paket' ? paketTab() : feeTab());
+  return tabs('pk', [['paket', 'Paket & Biaya Ortu'], ['fee', 'Fee Tentor'], ['tentor', 'Jenjang & Fee Khusus Tentor']], 'paket') + (t === 'fee' ? feeTentorTab() : t === 'tentor' ? feeTab() : paketTab());
 }
 function paketTab() {
-  return `<div class="card"><div class="card-head"><div><h3>Daftar paket belajar</h3><p class="small muted"><b>Biaya</b> = tarif ke orang tua (per bulan untuk klasikal, per jam untuk privat & home visit, per pertemuan untuk transport). <b>Fee</b> = honor tentor sesuai <b>jenjang tentor</b>: klasikal per sesi, privat/home visit per jam, transport per pertemuan. Kolom jenjang kosong = pakai fee Mitra Tentor.</p></div><div class="spacer"></div><button class="btn ghost" onclick="addPaket()">${ic('plus')} Tambah paket</button></div>
-  <form id="fPaket" onsubmit="event.preventDefault();savePaket()"><div class="table-wrap"><table class="t"><thead><tr><th>#</th><th>Nama paket</th><th>Kategori</th><th>Biaya ortu</th><th>Satuan</th>${LEVEL_TENTOR.map(l => `<th style="white-space:normal;max-width:96px">Fee ${esc(l)}</th>`).join('')}<th>Waktu bayar</th><th>Aktif</th><th class="c">Siswa</th><th></th></tr></thead><tbody>
+  return `<div class="card"><div class="card-head"><div><h3>Daftar paket belajar (biaya orang tua)</h3><p class="small muted"><b>Biaya</b> = tarif ke orang tua: per bulan untuk klasikal (dibedakan 2x / 3x seminggu), per jam untuk privat & home visit, per pertemuan untuk transport. Honor tentor diatur terpisah di tab <b>Fee Tentor</b>.</p></div><div class="spacer"></div><button class="btn ghost" onclick="addPaket()">${ic('plus')} Tambah paket</button></div>
+  <form id="fPaket" onsubmit="event.preventDefault();savePaket()"><div class="table-wrap"><table class="t"><thead><tr><th>#</th><th>Nama paket</th><th>Kategori</th><th>Biaya ortu</th><th>Satuan</th><th>Waktu bayar</th><th>Aktif</th><th class="c">Siswa</th><th></th></tr></thead><tbody>
   ${paketSorted().map(p => `<tr data-id="${p.id}">
     <td><input class="input" name="urut" style="width:52px" value="${esc(p.urut || '')}"></td>
     <td><input class="input" name="nama" style="min-width:210px" value="${esc(p.nama)}"></td>
     <td><select class="input" name="kategori" style="width:auto">${optList(KATEGORI, p.kategori)}</select></td>
     <td><input class="input" name="harga" inputmode="numeric" style="width:105px" value="${esc(p.harga || '')}" placeholder="0"></td>
     <td><select class="input" name="satuan" style="width:auto">${optList([['Per bulan', 'per bulan (klasikal)'], ['Per jam', 'per jam (privat/HV)'], ['Per pertemuan', 'per pertemuan (transport)']], p.satuan || 'Per bulan')}</select></td>
-    ${LEVEL_TENTOR.map((l, i) => `<td><input class="input" name="${LEVEL_COL[l]}" inputmode="numeric" style="width:96px" value="${esc(p[LEVEL_COL[l]] || '')}" placeholder="${i ? esc(p.feeGuru || 0) : '0'}"></td>`).join('')}
     <td><select class="input" name="waktuBayar" style="width:auto">${optList([['Awal', 'Awal bulan'], ['Akhir', 'Akhir bulan']], p.waktuBayar || 'Awal')}</select></td>
     <td><select class="input" name="aktif" style="width:auto">${optList(['Ya', 'Tidak'], p.aktif || 'Ya')}</select></td>
     <td class="c num">${D('Siswa').filter(s => s.paketId === p.id && s.status === 'Aktif').length}</td>
-    <td><button type="button" class="icon-btn" onclick="delPaket('${p.id}')">${ic('trash')}</button></td></tr>`).join('') || '<tr><td colspan="13"><div class="empty">Belum ada paket</div></td></tr>'}
+    <td><button type="button" class="icon-btn" onclick="delPaket('${p.id}')">${ic('trash')}</button></td></tr>`).join('') || '<tr><td colspan="9"><div class="empty">Belum ada paket</div></td></tr>'}
   </tbody></table></div>
-  <div class="row" style="margin-top:14px"><span class="small muted">Paket kategori <b>Transport</b> = transport per pertemuan untuk siswa home visit / privat rumah: biayanya masuk tagihan, fee-nya ke guru.</span><div class="spacer"></div><button class="btn">Simpan Semua Paket</button></div></form></div>
-  <div class="card bg-cream" style="box-shadow:var(--sh-sm)"><h3>Cara hitung gaji guru</h3>
-    <p class="small">• <b>Klasikal</b> (paket per bulan) — guru dapat fee <b>per sesi</b> yang ia isi (bukan per jumlah anak). Fee SD dan SMP dibedakan lewat paketnya.<br>
-    • <b>Privat & home visit</b> (paket per jam) — fee per jam × durasi sesi (1 jam, 1,5 jam, …). Satu sesi berisi 2–4 anak home visit tetap dihitung 1 sesi.<br>
-    • Ada anak <b>home visit / privat rumah</b> di sesi itu → guru juga dapat fee transport per pertemuan.<br>
-    • <b>Komponen tambahan</b> (admin, bonus, lemburan, tunjangan) & potongan diisi di menu Gaji Guru → ✏️.<br>
-    • Fee mengikuti <b>jenjang tentor</b>: Mitra → Utama → Andalan → Master. Fee khusus per tentor mengalahkan fee jenjang.<br>
-    • Tagihan ortu: klasikal per bulan (jatuh tempo tgl ${esc(S.settings.jatuhTempo || 15)}) · privat & home visit = jam hadir × tarif + transport, ditagih tgl ${esc(S.settings.tagihAkhirMulai || 25)}, jatuh tempo tgl ${esc(S.settings.jatuhTempoAkhir || 27)}.</p></div>`;
+  <div class="row" style="margin-top:14px"><span class="small muted">Paket kategori <b>Transport</b> = biaya transport per pertemuan untuk siswa home visit / privat rumah (masuk tagihan ortu).</span><div class="spacer"></div><button class="btn">Simpan Semua Paket</button></div></form></div>
+  <div class="card bg-cream" style="box-shadow:var(--sh-sm)"><h3>Cara hitung</h3>
+    <p class="small">• <b>Tagihan ortu</b>: klasikal per bulan sesuai paket (2x / 3x seminggu, jatuh tempo tgl ${esc(S.settings.jatuhTempo || 15)}) · privat & home visit = jam hadir × tarif + transport, ditagih tgl ${esc(S.settings.tagihAkhirMulai || 25)}, jatuh tempo tgl ${esc(S.settings.jatuhTempoAkhir || 27)}.<br>
+    • <b>Honor tentor</b>: dari tab <b>Fee Tentor</b> — berdasarkan jenis kelas & <b>jumlah anak yang hadir</b> di sesi itu (klasikal 1–2 anak / 3–4 anak, home visit 2/3/4 anak), jenjang siswa, dan durasi. Tidak ikut harga paket ortu.</p></div>`;
 }
 function addPaket() {
   const p = { id: '', nama: 'Paket baru', kategori: 'Klasikal', harga: '0', feeGuru: '0', satuan: 'Per bulan', urut: String(D('Paket').length + 1), aktif: 'Ya', waktuBayar: 'Awal' };
   saveRow('Paket', p).then(() => { toast('Paket ditambahkan — silakan ubah namanya'); renderPage(); }).catch(e => toast(e.message, true));
 }
 async function savePaket() {
-  const rows = $$('#fPaket tr[data-id]').map(tr => { const o = { id: tr.dataset.id }; $$('[name]', tr).forEach(i => o[i.name] = i.value.trim()); o.harga = digits(o.harga) || '0'; o.feeGuru = digits(o.feeGuru) || '0'; ['feeUtama', 'feeAndalan', 'feeMaster'].forEach(k => o[k] = digits(o[k])); return o; });
+  const rows = $$('#fPaket tr[data-id]').map(tr => { const o = Object.assign({}, paketById(tr.dataset.id), { id: tr.dataset.id }); $$('[name]', tr).forEach(i => o[i.name] = i.value.trim()); o.harga = digits(o.harga) || '0'; return o; });
   if (rows.some(r => !r.nama)) return toast('Nama paket tidak boleh kosong', true);
   try { await saveRows('Paket', rows); toast('Paket tersimpan ✓'); renderPage(); } catch (e) { toast(e.message, true); }
 }
@@ -1594,76 +1640,204 @@ function delPaket(id) {
   const n = D('Siswa').filter(s => s.paketId === id).length;
   confirmBox(`Hapus paket <b>${esc((paketById(id) || {}).nama)}</b>?${n ? ` Ada ${n} siswa memakai paket ini — sebaiknya ubah <b>Aktif = Tidak</b> saja.` : ''}`, async () => { await removeRow('Paket', id); toast('Paket dihapus'); renderPage(); });
 }
+/* ---------- tab Fee Tentor ---------- */
+function feeTentorTab() {
+  const L = levels();
+  return `<div class="card"><div class="card-head"><div><h3>Fee tentor ${esc(S.settings.tahunAjaran || '')}</h3><p class="small muted">Honor per sesi tentor. <b>Fee</b> = untuk 1 sesi sesuai durasinya (baris 1 jam dikalikan durasi sesi, mis. 1,5 jam × fee). Jumlah anak = anak yang <b>hadir</b> di sesi itu. Kolom jenjang tentor kosong = pakai fee dasar. Fee khusus per tentor diatur di tab sebelah.</p></div><div class="spacer"></div><button class="btn ghost" onclick="addFeeRow()">${ic('plus')} Tambah baris</button></div>
+  <form id="fFeeT" onsubmit="event.preventDefault();saveFeeRows()"><div class="table-wrap"><table class="t"><thead><tr><th>#</th><th>Jenis belajar</th><th>Jumlah anak</th><th>Jenjang siswa</th><th>Durasi (jam)</th><th>Fee dasar</th>${L.slice(1).map(l => `<th style="white-space:normal;max-width:100px">Fee ${esc(l)}</th>`).join('')}<th>Transport</th><th></th></tr></thead><tbody>
+  ${feeRows().map(r => { const lv = feeLvMap(r); return `<tr data-id="${r.id}">
+    <td><input class="input" name="urut" style="width:52px" value="${esc(r.urut || '')}"></td>
+    <td><select class="input" name="jenis" style="width:auto">${optList(FEE_JENIS, r.jenis)}</select></td>
+    <td><input class="input" name="anak" style="width:70px" value="${esc(r.anak || '')}" placeholder="—"></td>
+    <td><input class="input" name="jenjang" style="width:120px" value="${esc(r.jenjang || '')}" placeholder="TK & SD"></td>
+    <td><input class="input" name="durasi" inputmode="decimal" style="width:64px" value="${esc(fmtJam(+r.durasi || 1))}"></td>
+    <td><input class="input" name="fee" inputmode="numeric" style="width:100px" value="${esc(r.fee || '')}" placeholder="0"></td>
+    ${L.slice(1).map((l, i) => `<td><input class="input" data-lv="${i + 1}" inputmode="numeric" style="width:96px" value="${esc(lv[i + 1] || '')}" placeholder="${esc(r.fee || 0)}"></td>`).join('')}
+    <td><input class="input" name="transport" inputmode="numeric" style="width:86px" value="${esc(r.transport || '')}" placeholder="—"></td>
+    <td><button type="button" class="icon-btn" onclick="delFeeRow('${r.id}')">${ic('trash')}</button></td></tr>`; }).join('') || `<tr><td colspan="${8 + L.length}"><div class="empty">Belum ada fee. Klik <b>Isi fee standar</b> untuk memakai tabel FEE TENTOR 2026/2027.</div></td></tr>`}
+  </tbody></table></div>
+  <div class="row" style="margin-top:14px"><button type="button" class="btn ghost" onclick="isiFeeStandar()">Isi fee standar 2026/2027</button><span class="small muted">Jenjang siswa: <b>TK</b>, <b>SD</b>, <b>SMP</b>, <b>SMA</b>, atau gabungan seperti <b>TK & SD</b>, <b>SD & SMP</b>. Jumlah anak: klasikal <b>1-2</b> / <b>3-4</b>, home visit <b>2</b> / <b>3</b> / <b>4</b>, privat kosong.</span><div class="spacer"></div><button class="btn">Simpan Fee</button></div></form></div>
+  <div class="card bg-cream" style="box-shadow:var(--sh-sm)"><h3>Cara portal memilih fee</h3>
+    <p class="small">• Jenis dari <b>tipe jadwal</b> sesi: Klasikal/Rombel → Klasikal · Privat Rumah → Privat (+ transport) · Privat Bimbel → Privat Bimbel · Home Visit → Home Visit (1 anak dihitung Privat). Sesi tambahan tanpa jadwal → dari paket anak.<br>
+    • <b>Jumlah anak</b> = siswa yang dicentang hadir: klasikal 1–2 / 3–4 (5 anak atau lebih ikut 3–4), home visit 2 / 3 / 4.<br>
+    • <b>Jenjang siswa</b> dari data siswa yang hadir (klasikal: TK & SD atau SMP; home visit campuran → TK & SD / SD & SMP).<br>
+    • Ada baris dengan durasi persis sama (mis. home visit 1,5 jam) → fee baris itu. Selain itu fee 1 jam × durasi.<br>
+    • Baris tidak ketemu → honor Rp0 dan ditandai merah di Gaji Guru.</p></div>`;
+}
+const FEE_STD = [['Klasikal', '1-2', 'TK & SD', 1, 20000, ''], ['Klasikal', '3-4', 'TK & SD', 1, 25000, ''], ['Klasikal', '1-2', 'SMP', 1, 22000, ''], ['Klasikal', '3-4', 'SMP', 1, 25000, ''],
+  ['Privat', '', 'TK', 1, 25000, 8000], ['Privat', '', 'SD', 1, 26000, 8000], ['Privat', '', 'SMP', 1, 32000, 8000], ['Privat', '', 'SMA', 1, 42000, 8000],
+  ['Privat Bimbel', '', 'TK', 1, 24000, ''], ['Privat Bimbel', '', 'SD', 1, 25000, ''], ['Privat Bimbel', '', 'SMP', 1, 28000, ''], ['Privat Bimbel', '', 'SMA', 1, 32000, ''],
+  ['Home Visit', '2', 'TK & SD', 1, 24000, ''], ['Home Visit', '2', 'SD', 1, 25000, ''], ['Home Visit', '2', 'SD & SMP', 1, 30000, ''], ['Home Visit', '2', 'SMP', 1, 40000, ''],
+  ['Home Visit', '3', 'TK & SD', 1, 30000, ''], ['Home Visit', '3', 'SD', 1, 35000, ''], ['Home Visit', '3', 'SD & SMP', 1, 35000, ''], ['Home Visit', '3', 'SMP', 1, 40000, ''],
+  ['Home Visit', '4', 'TK & SD', 1, 40000, ''], ['Home Visit', '4', 'SD', 1, 45000, ''], ['Home Visit', '4', 'SD & SMP', 1, 50000, ''], ['Home Visit', '4', 'SMP', 1, 55000, ''],
+  ['Home Visit', '3', 'TK & SD', 1.5, 35000, ''], ['Home Visit', '3', 'SD', 1.5, 40000, ''], ['Home Visit', '3', 'SD & SMP', 1.5, 50000, ''], ['Home Visit', '3', 'SMP', 1.5, 55000, ''],
+  ['Home Visit', '4', 'TK & SD', 1.5, 40000, ''], ['Home Visit', '4', 'SD', 1.5, 45000, ''], ['Home Visit', '4', 'SD & SMP', 1.5, 50000, ''], ['Home Visit', '4', 'SMP', 1.5, 55000, '']];
+function isiFeeStandar() {
+  const ada = feeRows('').length;
+  confirmBox(`${ada ? `<b>${ada} baris fee</b> yang ada akan diganti.<br>` : ''}Isi tabel dengan FEE TENTOR 2026/2027 (${FEE_STD.length} baris)?`, async () => {
+    try {
+      for (const r of feeRows('')) await removeRow('FeeTentor', r.id);
+      await saveRows('FeeTentor', FEE_STD.map((f, i) => ({ id: '', jenis: f[0], anak: f[1], jenjang: f[2], durasi: String(f[3]), fee: String(f[4]), transport: String(f[5]), urut: String(i + 1), feeLv: '', guruId: '' })));
+      toast('Fee standar terisi ✓'); renderPage();
+    } catch (e) { toast(e.message, true); }
+  }, 'Ya, isi');
+}
+function addFeeRow() { saveRow('FeeTentor', { id: '', jenis: 'Klasikal', anak: '', jenjang: 'SD', durasi: '1', fee: '0', transport: '', urut: String(feeRows('').length + 1), feeLv: '', guruId: '' }).then(() => renderPage()).catch(e => toast(e.message, true)); }
+async function saveFeeRows() {
+  const rows = $$('#fFeeT tr[data-id]').map(tr => {
+    const o = Object.assign({}, feeById(tr.dataset.id)); $$('[name]', tr).forEach(i => o[i.name] = i.value.trim());
+    o.fee = digits(o.fee) || '0'; o.transport = digits(o.transport); o.durasi = String(parseFloat(String(o.durasi).replace(',', '.')) || 1);
+    const lv = {}; $$('input[data-lv]', tr).forEach(i => { const v = digits(i.value); if (v !== '') lv[i.dataset.lv] = v; }); o.feeLv = Object.keys(lv).length ? JSON.stringify(lv) : '';
+    return o;
+  });
+  try { await saveRows('FeeTentor', rows); toast('Fee tentor tersimpan ✓'); renderPage(); } catch (e) { toast(e.message, true); }
+}
+function delFeeRow(id) { confirmBox(`Hapus baris fee <b>${esc(feeRowLabel(feeById(id)))}</b>?`, async () => { await removeRow('FeeTentor', id); renderPage(); }); }
+/* ---------- tab Jenjang & fee khusus tentor ---------- */
 function feeTab() {
-  const pk = paketSorted().filter(p => p.aktif !== 'Tidak');
   const q = (S.f.feeQ || '').toLowerCase();
   const gs = D('Guru').filter(g => g.status !== 'Nonaktif' && (!q || g.nama.toLowerCase().includes(q)));
-  return `<div class="card"><div class="card-head"><div><h3>Jenjang & fee khusus tentor</h3><p class="small muted">Pilih jenjang tiap tentor → fee otomatis mengikuti jenjang (angka abu-abu). Isi kotak hanya bila ada fee khusus (hijau) yang berbeda dari jenjangnya.</p></div><div class="spacer"></div>
+  return `<div class="card"><div class="card-head"><div><h3>Jenjang & fee khusus tentor</h3><p class="small muted">Pilih jenjang tiap tentor → fee mengikuti kolom jenjang di tab Fee Tentor. Tentor dengan fee pribadi (mis. hasil Growth Report) → klik <b>Fee khusus</b>.</p></div><div class="spacer"></div>
+    <button class="btn ghost" onclick="formJenjang()">${ic('edit')} Ubah nama jenjang</button>
     <input class="input" style="max-width:200px" placeholder="Cari guru…" value="${esc(S.f.feeQ || '')}" onchange="setF('feeQ',this.value)"></div>
-  <form id="fFee" onsubmit="event.preventDefault();saveFee()"><div class="table-wrap"><table class="t matrix"><thead><tr><th>Tentor</th><th>Jenjang</th>${pk.map(p => `<th title="${esc(p.nama)}" style="white-space:normal;min-width:110px;max-width:130px;font-size:10.5px">${esc(p.nama)}</th>`).join('')}</tr></thead><tbody>
-  ${gs.map(g => { const m = feeMap(g); return `<tr data-gid="${g.id}"><td class="gname">${esc(g.nama)}<div class="small muted">${esc(g.id)}</div></td><td><select class="input" data-lv style="width:auto;padding:7px 9px" onchange="feeLvChange(this)">${optList(LEVEL_TENTOR, levelOf(g))}</select></td>${pk.map(p => { const v = m[p.id] !== undefined ? m[p.id] : ''; return `<td><input class="input ${v !== '' ? 'set' : ''}" data-pid="${p.id}" inputmode="numeric" placeholder="${esc(feeLevel(p, levelOf(g)))}" value="${esc(v)}" oninput="this.classList.toggle('set',this.value!=='')"></td>`; }).join('')}</tr>`; }).join('') || `<tr><td colspan="${pk.length + 2}"><div class="empty">Tidak ada guru</div></td></tr>`}
+  <form id="fFee" onsubmit="event.preventDefault();saveFee()"><div class="table-wrap"><table class="t"><thead><tr><th>Tentor</th><th>Jenjang</th><th>Fee khusus</th><th></th></tr></thead><tbody>
+  ${gs.map(g => { const ks = feeRows(g.id); return `<tr data-gid="${g.id}"><td class="gname"><b>${esc(g.nama)}</b><div class="small muted">${esc(g.id)}</div></td><td><select class="input" data-lv style="width:auto;padding:7px 9px">${optList([...new Set(levels().concat([levelOf(g)]))], levelOf(g))}</select></td>
+    <td class="small">${ks.length ? ks.slice(0, 3).map(r => `${esc(feeRowLabel(r))}: <b>${rp(r.fee)}</b>`).join('<br>') + (ks.length > 3 ? `<br><span class="muted">+${ks.length - 3} lagi</span>` : '') : '<span class="muted">ikut fee standar & jenjang</span>'}</td>
+    <td><button type="button" class="btn sm ghost" onclick="formFeeKhusus('${g.id}')">Fee khusus${ks.length ? ' (' + ks.length + ')' : ''}</button></td></tr>`; }).join('') || '<tr><td colspan="4"><div class="empty">Tidak ada guru</div></td></tr>'}
   </tbody></table></div>
-  <div class="row" style="margin-top:14px"><span class="small muted">Bisa juga diubah per tentor lewat menu Data Guru → edit.</span><div class="spacer"></div><button class="btn">Simpan Jenjang & Fee</button></div></form></div>`;
+  <div class="row" style="margin-top:14px"><span class="small muted">Jenjang juga bisa diubah per tentor lewat Data Guru → ✏️.</span><div class="spacer"></div><button class="btn">Simpan Jenjang</button></div></form></div>`;
 }
 async function saveFee() {
   const changed = [];
-  $$('#fFee tr[data-gid]').forEach(tr => {
-    const g = guruById(tr.dataset.gid), m = Object.assign({}, feeMap(g));
-    $$('input[data-pid]', tr).forEach(i => { const v = digits(i.value); if (v === '') delete m[i.dataset.pid]; else m[i.dataset.pid] = v; });
-    const js = Object.keys(m).length ? JSON.stringify(m) : '', lv = $('[data-lv]', tr).value;
-    if (js !== (g.tarifPaket || '') || lv !== levelOf(g) || g.jenjang !== lv) changed.push(Object.assign({}, g, { tarifPaket: js, jenjang: lv }));
-  });
+  $$('#fFee tr[data-gid]').forEach(tr => { const g = guruById(tr.dataset.gid), lv = $('[data-lv]', tr).value; if (lv !== levelOf(g) || g.jenjang !== lv) changed.push(Object.assign({}, g, { jenjang: lv })); });
   if (!changed.length) return toast('Tidak ada perubahan');
   try { await saveRows('Guru', changed); toast(`${changed.length} tentor tersimpan ✓`); renderPage(); } catch (e) { toast(e.message, true); }
 }
-function feeLvChange(sel) {
-  const tr = sel.closest('tr');
-  $$('input[data-pid]', tr).forEach(i => i.placeholder = feeLevel(paketById(i.dataset.pid), sel.value));
+/* fee khusus = baris fee milik 1 tentor (mis. hasil Growth Report). Didahulukan dari fee standar bila jenis/anak/jenjang cocok. */
+function formFeeKhusus(gid) {
+  const g = guruById(gid);
+  S._fk = feeRows(gid).map(r => Object.assign({}, r)); S._fkDel = []; S._fkG = gid;
+  modal(`Fee khusus — ${esc(g.nama)}`, `<p class="small muted" style="margin-bottom:8px">Jenjang: <b>${esc(levelOf(g))}</b>. Baris di sini <b>didahulukan</b>; yang tidak ada di sini memakai fee standar (tab Fee Tentor). Jumlah anak boleh rentang (<b>1-2</b>, <b>5-6</b>) atau angka (<b>3</b>); kosong = berapa pun.</p>
+    <div class="table-wrap"><table class="t"><thead><tr><th>Jenis</th><th>Anak</th><th>Jenjang siswa</th><th>Durasi</th><th>Fee</th><th>Transport</th><th></th></tr></thead><tbody id="fkBox"></tbody></table></div>
+    <div class="row" style="margin-top:8px"><button type="button" class="chip" onclick="S._fk.push({id:'',jenis:'Klasikal',anak:'',jenjang:'TK & SD',durasi:'1',fee:'',transport:'',guruId:'${gid}'});fkRender()">+ Tambah baris</button><button type="button" class="chip" onclick="fkSalin()">Salin dari fee standar</button></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="saveFeeKhusus('${gid}')">Simpan</button>`, true);
+  fkRender();
+}
+function fkRender() {
+  const up = (i, k) => `oninput="S._fk[${i}].${k}=this.value"`;
+  $('#fkBox').innerHTML = S._fk.map((r, i) => `<tr><td><select class="input" style="width:auto" onchange="S._fk[${i}].jenis=this.value">${optList(FEE_JENIS, r.jenis)}</select></td>
+    <td><input class="input" style="width:64px" value="${esc(r.anak || '')}" ${up(i, 'anak')}></td><td><input class="input" style="width:110px" value="${esc(r.jenjang || '')}" ${up(i, 'jenjang')}></td>
+    <td><input class="input" style="width:56px" value="${esc(fmtJam(+r.durasi || 1))}" ${up(i, 'durasi')}></td><td><input class="input" style="width:92px" inputmode="numeric" value="${esc(r.fee || '')}" ${up(i, 'fee')}></td>
+    <td><input class="input" style="width:80px" inputmode="numeric" value="${esc(r.transport || '')}" ${up(i, 'transport')}></td>
+    <td><button type="button" class="icon-btn" onclick="if(S._fk[${i}].id)S._fkDel.push(S._fk[${i}].id);S._fk.splice(${i},1);fkRender()">${ic('trash')}</button></td></tr>`).join('') || '<tr><td colspan="7"><div class="small muted">Belum ada fee khusus — tentor ini memakai fee standar.</div></td></tr>';
+}
+function fkSalin() { const gid = S._fkG, g = guruById(gid); feeRows('').forEach(r => { if (!S._fk.some(x => x.jenis === r.jenis && String(x.anak) === String(r.anak) && jjKeyOf(x.jenjang) === jjKeyOf(r.jenjang) && +x.durasi === +r.durasi)) S._fk.push({ id: '', jenis: r.jenis, anak: r.anak, jenjang: r.jenjang, durasi: r.durasi, fee: String(feeBase(r, levelIdx(g))), transport: r.transport, guruId: gid }); }); fkRender(); }
+const jjKeyOf = s => [...jjSet(s)].sort().join('+');
+async function saveFeeKhusus(gid) {
+  const rows = S._fk.filter(r => r.jenis && digits(r.fee) !== '').map((r, i) => Object.assign({}, r, { guruId: gid, fee: digits(r.fee), transport: digits(r.transport), durasi: String(parseFloat(String(r.durasi).replace(',', '.')) || 1), urut: String(i + 1), feeLv: '' }));
+  try { for (const id of S._fkDel) await removeRow('FeeTentor', id); if (rows.length) await saveRows('FeeTentor', rows); closeModal(); toast('Fee khusus tersimpan ✓'); renderPage(); } catch (e) { toast(e.message, true); }
+}
+/* nama jenjang tentor bisa diganti; tentor ikut berganti nama jenjangnya (berdasarkan urutan) */
+function formJenjang() {
+  S._lv = levels().slice();
+  modal('Nama jenjang tentor', `<p class="small muted" style="margin-bottom:8px">Urutan = tingkat (paling atas = jenjang awal tentor baru). Mengganti nama otomatis mengganti jenjang semua tentor di tingkat itu. Fee tiap jenjang diatur di tab Fee Tentor.</p><div id="lvBox"></div>
+    <button type="button" class="chip" style="margin-top:8px" onclick="S._lv.push('');lvRender()">+ Tambah jenjang</button>`,
+    `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="saveJenjang()">Simpan</button>`);
+  lvRender();
+}
+function lvRender() {
+  $('#lvBox').innerHTML = S._lv.map((l, i) => `<div class="row" style="flex-wrap:nowrap;gap:6px;margin-bottom:6px"><span class="small muted" style="width:22px">${i + 1}.</span><input class="input" style="flex:1" value="${esc(l)}" oninput="S._lv[${i}]=this.value"><span class="small muted" style="width:70px">${D('Guru').filter(g => levelOf(g) === levels()[i]).length} tentor</span>${S._lv.length > 1 ? `<button type="button" class="icon-btn" onclick="S._lv.splice(${i},1);lvRender()">${ic('trash')}</button>` : ''}</div>`).join('');
+}
+async function saveJenjang() {
+  const old = levels(), neu = S._lv.map(x => String(x).trim()).filter(Boolean);
+  if (!neu.length) return toast('Minimal 1 jenjang', true);
+  if (new Set(neu).size !== neu.length) return toast('Nama jenjang tidak boleh sama', true);
+  const ren = {}; old.forEach((o, i) => { if (neu[i] && neu[i] !== o) ren[o] = neu[i]; });
+  try {
+    const r = await call('saveSettings', { settings: { jenjangTentor: neu.join('\n') } }); S.settings = r.settings;
+    const gs = D('Guru').filter(g => ren[levelOf(g)] || !neu.includes(levelOf(g))).map(g => Object.assign({}, g, { jenjang: ren[levelOf(g)] || neu[Math.min(old.indexOf(levelOf(g)), neu.length - 1)] || neu[0] }));
+    if (gs.length) await saveRows('Guru', gs);
+    closeModal(); toast(`Jenjang tersimpan ✓${gs.length ? ` · ${gs.length} tentor diperbarui` : ''}`); renderPage();
+  } catch (e) { toast(e.message, true); }
 }
 
 /* ================= JADWAL ================= */
 function pgJadwal() {
+  const t = S.tab.jd || 'minggu', nTgl = D('Jadwal').filter(j => j.tanggal && j.tanggal >= todayStr()).length;
+  const gf = S.f.jdG || '';
+  const head = `<div class="row" style="margin-bottom:10px">${tabs('jd', [['minggu', 'Mingguan (tiap hari)'], ['tanggal', `Per tanggal${nTgl ? ' (' + nTgl + ')' : ''}`]], 'minggu')}<div class="spacer"></div>
+    <select class="input" style="max-width:220px" onchange="setF('jdG',this.value)"><option value="">Semua guru</option>${D('Guru').filter(g => D('Jadwal').some(j => j.guruId === g.id)).map(g => `<option value="${g.id}" ${gf === g.id ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select>
+    <button class="btn" onclick="formJadwal('', ${t === 'tanggal' ? 'true' : 'false'})">${ic('plus')} Tambah Jadwal</button></div>`;
+  return head + (t === 'tanggal' ? jadwalTanggal(gf) : jadwalMingguan(gf));
+}
+const sessCard = j => { const ids = j.siswaIds ? j.siswaIds.split(',').map(x => x.trim()).filter(Boolean) : []; return `<div class="sess" onclick="formJadwal('${j.id}')">
+      <div class="row" style="gap:6px"><span class="time">${esc(j.jamMulai)}–${esc(j.jamSelesai)}</span><div class="spacer"></div><span class="badge ${/home/i.test(j.tipe) ? 'b-orange' : /privat/i.test(j.tipe) ? 'b-purple' : 'b-green'}">${esc(j.tipe)}</span><button class="icon-btn" style="width:28px;height:28px" title="Ingatkan via WA" onclick="event.stopPropagation();ingatkanJadwal('${j.id}')">${ic('bell')}</button></div>
+      <div class="small" style="margin-top:4px"><b>${esc(guruById(j.guruId).nama)}</b> · ${ids.length} siswa${j.mapel ? ' · ' + esc(j.mapel) : ''}${j.lokasi ? ' · ' + esc(j.lokasi) : ''}</div>
+      <div class="small muted">${ids.map(x => esc(siswaById(x).panggilan || siswaById(x).nama)).join(', ') || (j.catatan ? `<span style="color:var(--orange-700,#b45309)">${esc(j.catatan)}</span>` : '-')}</div></div>`; };
+function jadwalMingguan(gf) {
   const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-  if (D('Jadwal').some(j => j.hari === 'Minggu')) days.push('Minggu');
+  const W = D('Jadwal').filter(j => !j.tanggal);
+  if (W.some(j => j.hari === 'Minggu')) days.push('Minggu');
   const colors = ['bg-yellow', 'bg-green', 'bg-blue', 'bg-pink', 'bg-matcha', 'bg-orange', 'bg-purple'];
   const today = dayName(todayStr());
-  const gf = S.f.jdG || '';
-  return `<div class="row"><p class="muted" style="flex:1;min-width:200px">Jadwal kelas klasikal, privat & home visit. Klik sesi untuk mengubah. Siswa di jadwal guru = siswa yang tampil di Portal Guru.</p>
-    <select class="input" style="max-width:220px" onchange="setF('jdG',this.value)"><option value="">Semua guru</option>${D('Guru').filter(g => D('Jadwal').some(j => j.guruId === g.id)).map(g => `<option value="${g.id}" ${gf === g.id ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select>
-    <button class="btn" onclick="formJadwal()">${ic('plus')} Tambah Jadwal</button></div>
-  <div class="days">${days.map((d, i) => { const js = D('Jadwal').filter(j => j.hari === d && (!gf || j.guruId === gf)).sort((a, b) => (a.jamMulai || '').localeCompare(b.jamMulai || '')); return `<div class="day">
+  return `<p class="muted small" style="margin-bottom:10px">Jadwal rutin tiap minggu: klasikal, privat & home visit. Klik sesi untuk mengubah. Siswa di jadwal guru = siswa yang tampil di Portal Guru. Jadwal yang tanggalnya berubah-ubah (mis. SMP/SMA per mapel) → tab <b>Per tanggal</b>.</p>
+  <div class="days">${days.map((d, i) => { const js = W.filter(j => j.hari === d && (!gf || j.guruId === gf)).sort((a, b) => (a.jamMulai || '').localeCompare(b.jamMulai || '')); return `<div class="day">
     <h4 class="${colors[i]}">${d}${d === today ? '<span class="badge b-ink" style="margin-left:auto">Hari ini</span>' : ''}</h4>
-    ${js.length ? js.map(j => { const ids = j.siswaIds ? j.siswaIds.split(',').map(x => x.trim()).filter(Boolean) : []; return `<div class="sess" onclick="formJadwal('${j.id}')">
-      <div class="row" style="gap:6px"><span class="time">${esc(j.jamMulai)}–${esc(j.jamSelesai)}</span><div class="spacer"></div><span class="badge ${/home/i.test(j.tipe) ? 'b-orange' : /privat/i.test(j.tipe) ? 'b-purple' : 'b-green'}">${esc(j.tipe)}</span><button class="icon-btn" style="width:28px;height:28px" title="Ingatkan via WA" onclick="event.stopPropagation();ingatkanJadwal('${j.id}')">${ic('bell')}</button></div>
-      <div class="small" style="margin-top:4px"><b>${esc(guruById(j.guruId).nama)}</b> · ${ids.length} siswa${j.lokasi ? ' · ' + esc(j.lokasi) : ''}</div>
-      <div class="small muted">${ids.map(x => esc(siswaById(x).panggilan || siswaById(x).nama)).join(', ') || (j.catatan ? `<span style="color:var(--orange-700,#b45309)">${esc(j.catatan)}</span>` : '-')}</div></div>`; }).join('') : '<div class="small muted" style="padding:6px 4px">Tidak ada sesi</div>'}
+    ${js.length ? js.map(sessCard).join('') : '<div class="small muted" style="padding:6px 4px">Tidak ada sesi</div>'}
   </div>`; }).join('')}</div>`;
 }
-function formJadwal(id) {
-  const j = id ? D('Jadwal').find(x => x.id === id) : { hari: 'Senin', jamMulai: '15:00', jamSelesai: '16:30', tipe: tipeKelasList()[0], siswaIds: '', lokasi: listOf('lokasiList')[1] || '' };
-  const gj = j.guruId ? guruById(j.guruId) : null;
+function jadwalTanggal(gf) {
+  const p = S.f.jdP || thisPeriod();
+  const js = D('Jadwal').filter(j => j.tanggal && j.tanggal.startsWith(p) && (!gf || j.guruId === gf)).sort((a, b) => (a.tanggal + a.jamMulai).localeCompare(b.tanggal + b.jamMulai));
+  const byD = {}; js.forEach(j => (byD[j.tanggal] = byD[j.tanggal] || []).push(j));
+  return `<div class="card"><div class="card-head"><div><h3>Jadwal per tanggal — ${fmtPeriod(p)}</h3><p class="small muted">Untuk jadwal yang tidak tetap tiap minggu (SMP/SMA per mapel, persiapan ujian, les pengganti). Hanya muncul di tanggal itu — di Portal Guru, dashboard & pengingat.</p></div><div class="spacer"></div>
+    <select class="input" style="max-width:200px" onchange="setF('jdP',this.value)">${monthOptions(p, 3, 3)}</select></div>
+  ${Object.keys(byD).length ? Object.keys(byD).map(d => `<div style="margin-bottom:12px"><div class="row small" style="margin-bottom:6px"><b>${dayName(d)}, ${fmtDateLong(d)}</b>${d === todayStr() ? '<span class="badge b-ink">Hari ini</span>' : d < todayStr() ? '<span class="badge b-gray">lewat</span>' : ''}</div>
+    <div class="grid g3" style="gap:10px">${byD[d].map(sessCard).join('')}</div></div>`).join('') : `<div class="empty">Belum ada jadwal tanggal di ${fmtPeriod(p)}.</div>`}</div>`;
+}
+function formJadwal(id, dated) {
+  const j = id ? D('Jadwal').find(x => x.id === id) : { hari: 'Senin', jamMulai: '15:00', jamSelesai: '16:30', tipe: tipeKelasList()[0], siswaIds: '', lokasi: listOf('lokasiList')[1] || '', tanggal: dated ? todayStr() : '', mapel: '' };
+  const gj = j.guruId ? guruById(j.guruId) : null, tgl = !!j.tanggal;
   const sel = (j.siswaIds || '').split(',').map(x => x.trim());
+  S._jdDates = [];
   modal(id ? 'Edit Jadwal' : 'Tambah Jadwal', `<form id="fJadwal" class="form-grid" onsubmit="event.preventDefault();saveJadwal('${id || ''}')">
-    <div class="field"><label>Hari</label><select class="input" name="hari">${optList(['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'], j.hari)}</select></div>
+    <div class="field full"><label>Jenis jadwal</label><div class="chips"><button type="button" class="chip ${!tgl ? 'on' : ''}" data-mode="minggu" onclick="jdMode(false)">Setiap minggu (pilih hari)</button><button type="button" class="chip ${tgl ? 'on' : ''}" data-mode="tanggal" onclick="jdMode(true)">Tanggal tertentu</button></div></div>
+    <div class="field" id="jdHari" ${tgl ? 'style="display:none"' : ''}><label>Hari</label><select class="input" name="hari">${optList(['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'], j.hari)}</select></div>
+    <div class="field" id="jdTgl" ${tgl ? '' : 'style="display:none"'}><label>Tanggal${id ? '' : ' (bisa lebih dari satu)'}</label><div class="row" style="gap:6px;flex-wrap:nowrap"><input class="input" type="date" id="jdDate" value="${esc(j.tanggal || todayStr())}">${id ? '' : `<button type="button" class="btn sm ghost" onclick="jdAddDate()">+ Tambah</button>`}</div><div id="jdDates" class="chips" style="margin-top:6px"></div></div>
     <div class="field"><label>Tipe kelas</label><select class="input" name="tipe">${optList([...new Set(tipeKelasList().concat(j.tipe ? [j.tipe] : []))], j.tipe)}</select></div>
     <div class="field"><label>Jam mulai</label><input class="input" type="time" name="jamMulai" value="${esc(j.jamMulai)}"></div>
     <div class="field"><label>Jam selesai</label><input class="input" type="time" name="jamSelesai" value="${esc(j.jamSelesai)}"></div>
     <div class="field"><label>Guru/tentor (ketik untuk cari)</label><input class="input" name="guruPick" list="dlGuru" autocomplete="off" placeholder="ketik nama guru…" value="${gj ? esc(gj.nama + ' (' + gj.id + ')') : ''}" onfocus="this.select()"><datalist id="dlGuru">${D('Guru').filter(g => g.status !== 'Nonaktif' || g.id === j.guruId).map(g => `<option value="${esc(g.nama)} (${g.id})">`).join('')}</datalist></div>
     <div class="field"><label>Lokasi</label><select class="input" name="lokasi"><option value="">—</option>${optList([...new Set(listOf('lokasiList').concat(j.lokasi ? [j.lokasi] : []))], j.lokasi)}</select></div>
+    <div class="field"><label>Mapel / materi (opsional)</label><input class="input" name="mapel" list="dlMapel" value="${esc(j.mapel || '')}" placeholder="mis. Matematika"><datalist id="dlMapel">${(typeof mapelList === 'function' ? mapelList() : []).map(m => `<option value="${esc(m)}">`).join('')}</datalist></div>
     <div class="field full"><label>Daftar siswa <input class="input" style="display:inline-block;width:180px;padding:4px 9px;margin-left:8px" placeholder="cari…" oninput="$$('#swPick label').forEach(l=>l.style.display=l.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')"></label><div id="swPick" style="max-height:240px;overflow:auto;border:2px solid var(--line);border-radius:12px;padding:8px 12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:4px;background:#fff">
       ${siswaAktif().map(s => `<label class="row" style="gap:8px;font-weight:600;cursor:pointer;flex-wrap:nowrap"><input type="checkbox" name="sw" value="${s.id}" ${sel.includes(s.id) ? 'checked' : ''}> <span>${esc(s.nama)} <span class="small muted">${esc(kelasLabel(s))}</span></span></label>`).join('') || '<span class="muted">Belum ada siswa aktif</span>'}
     </div></div>
     <div class="field full"><label>Catatan</label><input class="input" name="catatan" value="${esc(j.catatan || '')}"></div>
-  </form>`, `${id ? `<button class="btn red" style="margin-right:auto" onclick="delJadwal('${id}')">${ic('trash')} Hapus</button>` : ''}<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="$('#fJadwal').requestSubmit()">Simpan</button>`, true);
+  </form>`, `${id ? `<button class="btn red" style="margin-right:auto" onclick="delJadwal('${id}')">${ic('trash')} Hapus</button>${tgl ? `<button class="btn ghost" onclick="dupJadwal('${id}')">Duplikat ke tanggal lain</button>` : ''}` : ''}<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="$('#fJadwal').requestSubmit()">Simpan</button>`, true);
+  S._jdTgl = tgl; jdDatesRender();
 }
+function jdMode(tgl) { S._jdTgl = tgl; $('#jdHari').style.display = tgl ? 'none' : ''; $('#jdTgl').style.display = tgl ? '' : 'none'; $$('#fJadwal [data-mode]').forEach(b => b.classList.toggle('on', (b.dataset.mode === 'tanggal') === tgl)); }
+function jdAddDate() { const v = $('#jdDate').value; if (v && !S._jdDates.includes(v)) S._jdDates.push(v); S._jdDates.sort(); jdDatesRender(); }
+function jdDatesRender() { const el = $('#jdDates'); if (el) el.innerHTML = S._jdDates.length ? S._jdDates.map((d, i) => `<span class="chip on">${fmtDate(d)} <b style="cursor:pointer;margin-left:4px" onclick="S._jdDates.splice(${i},1);jdDatesRender()">×</b></span>`).join('') + '<span class="small muted">+ tanggal di kotak juga ikut disimpan</span>' : ''; }
 async function saveJadwal(id) {
   const f = formData($('#fJadwal')); delete f.sw;
   f.siswaIds = $$('#fJadwal input[name=sw]:checked').map(x => x.value).join(',');
   const m = String(f.guruPick || '').match(/\(([A-Z]+\d+)\)\s*$/), gg = m ? D('Guru').find(g => g.id === m[1]) : D('Guru').find(g => g.nama.toLowerCase() === String(f.guruPick || '').trim().toLowerCase());
   if (!gg) return toast('Pilih guru dari daftar (ketik lalu klik namanya)', true);
   f.guruId = gg.id; delete f.guruPick;
-  try { await saveRow('Jadwal', Object.assign(id ? { id } : {}, f)); closeModal(); toast('Jadwal tersimpan'); renderPage(); } catch (e) { toast(e.message, true); }
+  if (f.jamSelesai && f.jamMulai && f.jamSelesai <= f.jamMulai) return toast('Jam selesai harus setelah jam mulai', true);
+  try {
+    if (S._jdTgl) {
+      const cur = $('#jdDate').value, dates = id ? [cur] : [...new Set(S._jdDates.concat(cur ? [cur] : []))].sort();
+      if (!dates.length || dates.some(d => !d)) return toast('Pilih tanggal', true);
+      const rows = dates.map(d => Object.assign(id ? Object.assign({}, D('Jadwal').find(x => x.id === id)) : {}, f, { id: id || '', tanggal: d, hari: dayName(d) }));
+      await saveRows('Jadwal', rows); toast(`${rows.length} jadwal tersimpan`);
+    } else { await saveRow('Jadwal', Object.assign(id ? Object.assign({}, D('Jadwal').find(x => x.id === id)) : {}, f, { id: id || '', tanggal: '' })); toast('Jadwal tersimpan'); }
+    closeModal(); renderPage();
+  } catch (e) { toast(e.message, true); }
 }
+function dupJadwal(id) { const j = D('Jadwal').find(x => x.id === id); closeModal(); formJadwal('', true); setTimeout(() => { const f = $('#fJadwal'); ['tipe', 'jamMulai', 'jamSelesai', 'lokasi', 'mapel', 'catatan'].forEach(k => { if (f[k]) f[k].value = j[k] || ''; }); f.guruPick.value = `${guruById(j.guruId).nama} (${j.guruId})`; const ids = (j.siswaIds || '').split(','); $$('#fJadwal input[name=sw]').forEach(c => c.checked = ids.includes(c.value)); }, 30); }
 function delJadwal(id) { confirmBox('Hapus jadwal ini?', async () => { await removeRow('Jadwal', id); toast('Jadwal dihapus'); renderPage(); }); }
 
 /* ================= SESI & KEHADIRAN ================= */
@@ -1711,7 +1885,7 @@ function formSesi(i) {
 }
 function sesiHint() {
   const f = $('#fSesi'); if (!f) return;
-  const hari = dayName(f.tanggal.value || todayStr()), js = D('Jadwal').filter(j => j.hari === hari && j.guruId === f.guruId.value);
+  const hari = dayName(f.tanggal.value || todayStr()), js = jadwalOn(D('Jadwal'), f.tanggal.value || todayStr()).filter(j => j.guruId === f.guruId.value);
   $('#sesiHint').innerHTML = js.length ? `<div class="row small"><span class="muted">Jadwal ${hari}:</span>${js.map(j => `<button type="button" class="chip" onclick="sesiPakaiJadwal('${j.id}')">${esc(j.jamMulai)} · ${j.siswaIds.split(',').filter(Boolean).length} siswa</button>`).join('')}</div>` : '';
 }
 function sesiPakaiJadwal(jid) {
@@ -1724,7 +1898,7 @@ async function saveSesiAdmin() {
   if (!ids.length) return toast('Centang minimal satu siswa yang hadir', true);
   const old = S._sesiEdit;
   try {
-    const jd = D('Jadwal').find(j => j.guruId === f.guruId && j.hari === dayName(f.tanggal) && j.jamMulai === f.jam);
+    const jd = jadwalOn(D('Jadwal'), f.tanggal).find(j => j.guruId === f.guruId && j.jamMulai === f.jam);
     const r = await call('saveSesi', { guruId: f.guruId, tanggal: f.tanggal, jam: f.jam, siswaIds: ids, old, jadwalId: jd ? jd.id : '', durasi: f.durasi });
     const keys = [sesiKey(f)].concat(old ? [sesiKey(old)] : []);
     S.db.Absensi = D('Absensi').filter(a => !keys.includes(sesiKey(a))).concat(r.rows);
@@ -1738,8 +1912,8 @@ function delSesi(i) {
   });
 }
 function jadwalLabel(a) {
-  const j = D('Jadwal').find(x => x.id === a.jadwalId) || D('Jadwal').find(x => x.guruId === a.guruId && x.hari === dayName(a.tanggal) && x.jamMulai === a.jam);
-  return j ? { key: j.id, label: `${j.hari} ${j.jamMulai} · ${j.tipe || ''}${j.lokasi ? ' · ' + j.lokasi : ''}` } : { key: 'x', label: 'Sesi tambahan / di luar jadwal' };
+  const j = D('Jadwal').find(x => x.id === a.jadwalId) || jadwalOn(D('Jadwal'), a.tanggal).find(x => x.guruId === a.guruId && x.jamMulai === a.jam);
+  return j ? { key: j.id, label: `${jadwalWhen(j)} ${j.jamMulai} · ${j.tipe || ''}${j.mapel ? ' · ' + j.mapel : ''}${j.lokasi ? ' · ' + j.lokasi : ''}` } : { key: 'x', label: 'Sesi tambahan / di luar jadwal' };
 }
 function rekapGuruKelas() {
   const p = S.f.rgP || thisPeriod();
@@ -2211,16 +2385,15 @@ function guruData() {
   return `<div class="card"><div class="card-head"><h3>Data guru / tentor (${D('Guru').length})</h3><div class="spacer"></div><input class="input" style="max-width:200px" placeholder="Cari guru…" value="${esc(S.f.gq || '')}" onchange="setF('gq',this.value)"><button class="btn ghost" onclick="csvLogin('guru')">${ic('download')} Daftar login</button>${isOwner() ? `<button class="btn" onclick="formGuru()">${ic('plus')} Tambah Guru</button>` : `<button class="btn" onclick="formGuru()">${ic('plus')} Tambah Guru</button>`}</div>
   <p class="small muted" style="margin:-4px 0 10px">Guru login ke <b>Portal Guru</b> memakai ID & PIN di kolom login. Klik 🔑 untuk mengirim akses lewat WhatsApp.</p>
   <div class="table-wrap"><table class="t"><thead><tr><th>Nama</th><th>Jenjang</th><th>WhatsApp</th><th>Login portal guru</th>${isOwner() ? '<th>Pembayaran gaji</th><th>Fee</th>' : ''}<th>Jadwal mengajar</th><th>Status</th><th></th></tr></thead><tbody>
-  ${list.map(g => { const js = D('Jadwal').filter(j => j.guruId === g.id); const nf = Object.keys(feeMap(g)).length; return `<tr><td style="min-width:170px"><b>${esc(g.nama)}</b><div class="small muted">${esc(g.mapel || '')}</div></td><td class="nowrap">${levelBadge(g)}</td><td>${esc(g.wa || '-')}</td>
+  ${list.map(g => { const js = D('Jadwal').filter(j => j.guruId === g.id); const nf = nKhusus(g); return `<tr><td style="min-width:170px"><b>${esc(g.nama)}</b><div class="small muted">${esc(g.mapel || '')}</div></td><td class="nowrap">${levelBadge(g)}</td><td>${esc(g.wa || '-')}</td>
   <td>${loginChip(g.id, g.pin, 'PIN')}</td>
   ${isOwner() ? `<td class="small">${g.metodeBayar ? `<b>${esc(g.metodeBayar)}</b> ${esc(g.noRekening || '')}<div class="muted">${g.atasNama ? 'a.n. ' + esc(g.atasNama) : ''}</div>` : '<span class="muted">—</span>'}</td><td class="small">${nf ? `<span class="badge b-green">${nf} fee khusus</span>` : '<span class="muted">ikut jenjang</span>'}</td>` : ''}
-  <td class="small">${js.map(j => `${j.hari.slice(0, 3)} ${j.jamMulai}`).join(' · ') || '-'}</td><td>${stBadge(g.status || 'Aktif')}</td>
+  <td class="small">${js.filter(j => !j.tanggal).map(j => `${j.hari.slice(0, 3)} ${j.jamMulai}`).join(' · ') || (js.length ? '' : '-')}${js.some(j => j.tanggal >= todayStr()) ? `<div class="muted">+ ${js.filter(j => j.tanggal >= todayStr()).length} jadwal tanggal</div>` : ''}</td><td>${stBadge(g.status || 'Aktif')}</td>
   <td class="nowrap r"><button class="icon-btn" title="Kirim akses portal guru" onclick="waGuru('${g.id}')">${ic('key')}</button><button class="icon-btn" onclick="formGuru('${g.id}')">${ic('edit')}</button><button class="icon-btn" onclick="delGuru('${g.id}')">${ic('trash')}</button></td></tr>`; }).join('') || `<tr><td colspan="${isOwner() ? 9 : 7}"><div class="empty">Belum ada guru</div></td></tr>`}
   </tbody></table></div></div>`;
 }
 function formGuru(id) {
-  const g = id ? guruById(id) : { status: 'Aktif', pin: rand4(), tarifPaket: '', jenjang: 'Mitra Tentor' };
-  const m = feeMap(g);
+  const g = id ? guruById(id) : { status: 'Aktif', pin: rand4(), tarifPaket: '', jenjang: levels()[0] };
   modal(id ? `Edit Guru — ${esc(g.id)}` : 'Tambah Guru', `<form id="fGuru" class="form-grid" onsubmit="event.preventDefault();saveGuru('${id || ''}')">
     <div class="field full"><label>Nama guru *</label><input class="input" name="nama" required value="${esc(g.nama || '')}"></div>
     <div class="field"><label>No. WhatsApp</label><input class="input" name="wa" inputmode="tel" value="${esc(g.wa || '')}"></div>
@@ -2238,17 +2411,13 @@ function formGuru(id) {
     <div class="field"><label>Pembayaran gaji ke</label><select class="input" name="metodeBayar"><option value="">—</option>${optList(METODE_GAJI, g.metodeBayar)}</select></div>
     <div class="field"><label>No. rekening / No. HP DANA</label><input class="input" name="noRekening" value="${esc(g.noRekening || '')}"></div>
     <div class="field full"><label>Atas nama</label><input class="input" name="atasNama" value="${esc(g.atasNama || '')}"></div>
-    <div class="field full"><label>Jenjang tentor</label><select class="input" name="jenjang" onchange="$$('#fGuru input[data-pid]').forEach(i=>i.placeholder=feeLevel(paketById(i.dataset.pid),this.value))">${optList(LEVEL_TENTOR.map((l, i) => [l, `${'★'.repeat(i + 1)} ${l}`]), levelOf(g))}</select><span class="hint">Fee otomatis mengikuti jenjang (diatur di Paket & Fee Tentor).</span></div>
-    <div class="field full"><label>Fee khusus per paket (pengecualian) — kosong = ikut fee jenjang</label>
-      <div style="border:2px solid var(--line);border-radius:12px;padding:6px 12px;max-height:260px;overflow:auto;background:#fff">
-      ${paketSorted().filter(p => p.aktif !== 'Tidak').map(p => `<div class="row" style="padding:5px 0;border-bottom:1px dashed var(--line);flex-wrap:nowrap"><span class="small" style="flex:1">${esc(p.nama)}<span class="muted"> · ${p.satuan === 'Per jam' ? 'per jam' : p.satuan === 'Per pertemuan' ? 'per pertemuan' : 'per sesi'}</span></span><input class="input ${m[p.id] !== undefined ? 'set' : ''}" style="width:120px;padding:6px 9px" data-pid="${p.id}" inputmode="numeric" placeholder="${esc(feeLevel(p, levelOf(g)))}" value="${esc(m[p.id] !== undefined ? m[p.id] : '')}" oninput="this.classList.toggle('set',this.value!=='')"></div>`).join('')}
-      </div></div>`}
+    <div class="field full"><label>Jenjang tentor</label><select class="input" name="jenjang">${optList([...new Set(levels().concat([levelOf(g)]))].map((l, i) => [l, `${'★'.repeat(Math.min(i + 1, 5))} ${l}`]), levelOf(g))}</select><span class="hint">Fee mengikuti jenjang (Paket & Fee Tentor → Fee Tentor). Nama jenjang bisa diganti di tab Jenjang & Fee Khusus.</span></div>
+    <div class="field full"><label>Fee khusus</label><div class="small">${id && nKhusus(g) ? `<b>${nKhusus(g)} baris fee khusus</b>` : 'Ikut fee standar & jenjang'} · <a href="#" onclick="event.preventDefault();${id ? `closeModal();formFeeKhusus('${id}')` : `toast('Simpan guru dulu, lalu atur fee khusus')`}">atur fee khusus</a></div></div>`}
     <div class="field full"><label>Catatan</label><input class="input" name="catatan" value="${esc(g.catatan || '')}"></div>
   </form>`, `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="$('#fGuru').requestSubmit()">Simpan</button>`, true);
 }
 async function saveGuru(id) {
   const f = formData($('#fGuru'));
-  if (isOwner()) { const m = {}; $$('#fGuru input[data-pid]').forEach(i => { const v = digits(i.value); if (v !== '') m[i.dataset.pid] = v; }); f.tarifPaket = Object.keys(m).length ? JSON.stringify(m) : ''; }
   try { const r = await saveRow('Guru', Object.assign(id ? { ...guruById(id) } : {}, f, id ? { id } : {})); closeModal(); toast(`Data ${r.nama} tersimpan (${r.id})`); renderPage(); } catch (e) { toast(e.message, true); }
 }
 function delGuru(id) { confirmBox(`Hapus guru <b>${esc(guruById(id).nama)}</b>? Saran: ubah status menjadi Nonaktif bila hanya berhenti mengajar.`, async () => { await removeRow('Guru', id); renderPage(); }); }
@@ -2259,14 +2428,15 @@ function waGuru(id) {
 }
 
 /* ================= GAJI GURU ================= */
-/* honor 1 sesi: fee paket tertinggi di antara anak yang hadir (klasikal = per sesi, privat/HV = per jam × durasi)
-   + transport sekali per sesi bila ada anak home visit / privat rumah */
+/* honor 1 sesi = fee tentor sesuai jenis kelas, jumlah & jenjang anak yang hadir, × durasi + transport (privat rumah) sekali per sesi */
+function jadwalOfSesi(x, rows) {
+  const jid = (rows.find(r => r.jadwalId) || {}).jadwalId;
+  return D('Jadwal').find(j => j.id === jid) || jadwalOn(D('Jadwal'), x.tanggal).find(j => j.guruId === x.guruId && j.jamMulai === x.jam) || null;
+}
 function sesiHonor(g, x, rows) {
-  const kids = x.siswa.map(siswaById), dur = Math.max(1 / 2, ...rows.map(durasiOf));
-  let pk = null, best = -1;
-  kids.forEach(k => { const q = paketById(k.paketId); if (!q) return; const f = feeFor(g, q) * (isPerJam(q) ? dur : 1); if (f > best) { best = f; pk = q; } });
-  const tp = transportPaket();
-  return { pk, dur, honor: pk ? Math.round(best) : 0, transport: tp && kids.some(k => k.homeVisit === 'Ya') ? feeFor(g, tp) : 0 };
+  const kids = x.siswa.map(siswaById), dur = Math.max(1 / 2, ...rows.map(durasiOf)), j = jadwalOfSesi(x, rows);
+  const info = jenisSesi(kids, j), f = findFee(info, dur, g), fee = feeOfRow(g, f.row);
+  return { info, row: f.row, dur, fee, exact: f.exact, honor: Math.round(fee * f.mult), transport: f.row ? (+f.row.transport || 0) : 0, j };
 }
 const tambahanOf = rec => (pj(rec && rec.tambahan, []) || []).filter(t => t && t.nama);
 const tambahanTotal = list => sum(list, t => (+t.qty || 0) * (+t.fee || 0));
@@ -2276,9 +2446,11 @@ function gajiCalc(g, p) {
   const rows = D('Absensi').filter(a => a.guruId === g.id && String(a.tanggal).startsWith(p));
   const by = {};
   groupSesiJAdm(rows).forEach(x => {
-    const rr = rows.filter(a => sesiKey(a) === x.key), h = sesiHonor(g, x, rr), perJam = isPerJam(h.pk);
-    const key = perJam ? x.siswa.map(id => siswaById(id).nama).sort().join(', ') : jadwalLabel(x).label;
-    const L = by[key] = by[key] || { nama: key, paket: h.pk ? h.pk.nama : '(paket belum diisi)', satuan: perJam ? 'Per jam' : 'Per sesi', n: 0, jam: 0, fee: h.pk ? feeFor(g, h.pk) : 0, honor: 0, transport: 0, ids: {} };
+    const rr = rows.filter(a => sesiKey(a) === x.key), h = sesiHonor(g, x, rr);
+    const who = h.info.jenis === 'Klasikal' ? (h.j ? `${h.j.tanggal ? fmtDate(h.j.tanggal) : h.j.hari} ${h.j.jamMulai}${h.j.lokasi ? ' · ' + h.j.lokasi : ''}` : 'Sesi tambahan') : x.siswa.map(id => siswaById(id).nama).sort().join(', ');
+    const lbl = h.row ? feeRowLabel(h.row) + (h.row.guruId ? ' (fee khusus)' : '') : `${h.info.jenis} · ${h.info.n} anak · ${h.info.jj.join(' & ')} (fee belum diatur)`;
+    const key = [lbl, who, h.fee, h.exact ? 's' : 'j'].join('|');
+    const L = by[key] = by[key] || { nama: who, paket: lbl, satuan: h.exact ? 'Per sesi' : 'Per jam', n: 0, jam: 0, fee: h.fee, honor: 0, transport: 0, ids: {} };
     L.n++; L.jam += h.dur; L.honor += h.honor; L.transport += h.transport; x.siswa.forEach(id => L.ids[id] = 1);
   });
   const lines = Object.values(by).map(l => ({ nama: l.nama, paket: l.paket, satuan: l.satuan, n: l.n, jam: Math.round(l.jam * 100) / 100, anak: Object.keys(l.ids).length, fee: l.fee, honor: l.honor, transport: l.transport })).sort((a, b) => b.honor - a.honor);
@@ -2676,7 +2848,9 @@ function qSearch(q) {
     + gr.map(g => `<button onmousedown="infoGuru('${g.id}')"><span class="avatar" style="width:30px;height:30px;font-size:11px;background:var(--pink-50)">${initials(g.nama)}</span><span style="flex:1"><b>${esc(g.nama)}</b><br><span class="small muted">Guru ${esc(g.id)} · ${esc(levelOf(g))}</span></span></button>`).join('')
     || '<div class="small muted" style="padding:10px 12px">Tidak ditemukan</div>';
 }
-const jadwalSiswa = id => D('Jadwal').filter(j => String(j.siswaIds || '').split(',').map(x => x.trim()).includes(id)).sort((a, b) => HARI.indexOf(a.hari) - HARI.indexOf(b.hari) || a.jamMulai.localeCompare(b.jamMulai));
+const jadwalSort = (a, b) => (a.tanggal ? 1 : 0) - (b.tanggal ? 1 : 0) || String(a.tanggal || '').localeCompare(String(b.tanggal || '')) || HARI.indexOf(a.hari) - HARI.indexOf(b.hari) || a.jamMulai.localeCompare(b.jamMulai);
+const jadwalAktif = j => !j.tanggal || j.tanggal >= todayStr();
+const jadwalSiswa = id => D('Jadwal').filter(j => jadwalAktif(j) && String(j.siswaIds || '').split(',').map(x => x.trim()).includes(id)).sort(jadwalSort);
 function infoSiswa(id) {
   const s = siswaById(id), pk = paketById(s.paketId), p = thisPeriod();
   const ab = D('Absensi').filter(a => a.siswaId === id && String(a.tanggal).startsWith(p)).sort((a, b) => (b.tanggal + b.jam).localeCompare(a.tanggal + a.jam));
@@ -2689,7 +2863,7 @@ function infoSiswa(id) {
     ${row('Kelas', esc(kelasLabel(s)) + (s.sekolah ? ' · ' + esc(s.sekolah) : ''))}
     ${row('Paket belajar', pk ? `<b>${esc(pk.nama)}</b>${canPay() ? ' · ' + tarifLabel(tarifOf(s)) + (tarifOf(s).khusus ? ' (khusus)' : '') : ''}${canPay() && ledgerOf(s).saldo ? ` · <span class="badge b-blue">deposit ${rp(ledgerOf(s).saldo)}</span>` : ''}` : `<span class="badge b-orange">Belum diisi</span>${s.paketDiminta ? ' diminta: ' + esc(s.paketDiminta) : ''}`)}
     ${row('Tempat les', esc(s.tempatLes || '-') + (s.homeVisit === 'Ya' ? ' · home visit' : ''))}
-    ${row('Jadwal', jadwalSiswa(id).map(j => `${esc(j.hari)} ${esc(j.jamMulai)} · ${esc(guruById(j.guruId).nama)} <span class="muted">(${esc(j.tipe || '')}${j.lokasi ? ' · ' + esc(j.lokasi) : ''})</span>`).join('<br>') || '<span class="muted">belum ada</span>')}
+    ${row('Jadwal', jadwalSiswa(id).map(j => `${esc(jadwalWhen(j))} ${esc(j.jamMulai)} · ${esc(guruById(j.guruId).nama)} <span class="muted">(${esc(j.tipe || '')}${j.mapel ? ' · ' + esc(j.mapel) : ''}${j.lokasi ? ' · ' + esc(j.lokasi) : ''})</span>`).join('<br>') || '<span class="muted">belum ada</span>')}
     ${row(`Sesi ${BULAN[+p.slice(5) - 1]}`, `<b>${ab.length}</b> hadir ${pay}${ab.length ? '<div class="small muted">' + ab.slice(0, 6).map(a => `${fmtDate(a.tanggal)} ${esc(a.jam || '')} · ${esc(guruById(a.guruId).nama)}`).join('<br>') + '</div>' : ''}`)}
     ${row('Orang tua', esc(s.ortu || '-') + (s.waOrtu ? ' · ' + esc(s.waOrtu) : '') + (s.waSiswa ? '<br>WA siswa ' + esc(s.waSiswa) : ''))}
     ${row('Alamat', esc(s.alamat || '-') + (s.mapsUrl ? ` · <a href="${esc(s.mapsUrl)}" target="_blank" rel="noopener">📍 Maps</a>` : ''))}
@@ -2697,7 +2871,7 @@ function infoSiswa(id) {
 }
 function infoGuru(id) {
   const g = guruById(id), p = thisPeriod(), t = todayStr();
-  const js = D('Jadwal').filter(j => j.guruId === id).sort((a, b) => HARI.indexOf(a.hari) - HARI.indexOf(b.hari) || a.jamMulai.localeCompare(b.jamMulai));
+  const js = D('Jadwal').filter(j => j.guruId === id && jadwalAktif(j)).sort(jadwalSort);
   const ses = groupSesi(D('Absensi').filter(a => a.guruId === id && String(a.tanggal).startsWith(p)));
   const row = (k, v) => `<tr><td class="muted" style="width:140px">${k}</td><td>${v}</td></tr>`;
   $('#qs') && ($('#qs').value = '');
@@ -2706,7 +2880,7 @@ function infoGuru(id) {
     ${row('WhatsApp', esc(g.wa || '-'))}
     ${g.jenjangAjar || g.mapel ? row('Bisa mengajar', esc(g.jenjangAjar || g.mapel)) : ''}${g.hariAjar ? row('Hari & jam', esc(g.hariAjar) + (g.shift ? ' · ' + esc(g.shift) : '')) : ''}
     ${g.maksSesi ? row('Maks. sesi/hari', esc(g.maksSesi)) : ''}${g.area ? row('Area', esc(g.area)) : ''}
-    ${row('Jadwal', js.map(j => `${esc(j.hari)} ${esc(j.jamMulai)} · ${esc(j.tipe || '')} · ${String(j.siswaIds || '').split(',').filter(Boolean).map(x => esc(siswaById(x.trim()).nama)).join(', ')}`).join('<br>') || '<span class="muted">belum ada</span>')}
+    ${row('Jadwal', js.map(j => `${esc(jadwalWhen(j))} ${esc(j.jamMulai)} · ${esc(j.tipe || '')}${j.mapel ? ' · ' + esc(j.mapel) : ''} · ${String(j.siswaIds || '').split(',').filter(Boolean).map(x => esc(siswaById(x.trim()).nama)).join(', ')}`).join('<br>') || '<span class="muted">belum ada</span>')}
     ${row('Sesi hari ini', ses.filter(x => x.tanggal === t).map(x => `${esc(x.jam)} · ${x.siswa.length} hadir`).join(', ') || '<span class="muted">belum ada</span>')}
     ${row(`Sesi ${BULAN[+p.slice(5) - 1]}`, `<b>${ses.length}</b> sesi`)}
   </tbody></table>`, `<button class="btn ghost" onclick="openWa('${esc(g.wa || '')}','')">${ic('wa')} Chat</button><button class="btn" onclick="closeModal();formGuru('${g.id}')">${ic('edit')} Edit</button>`, true);
@@ -2890,13 +3064,13 @@ function gTabJadwal() {
   const off = +S.f.gWk || 0, days = weekDates(off), me = gMe(), today = todayStr();
   const ses = groupSesiJ(S.g.Absensi.filter(a => a.guruId === me && days.includes(a.tanggal)));
   const cal = days.map(d => {
-    const js = S.g.Jadwal.filter(j => j.hari === dayName(d)).sort((a, b) => a.jamMulai.localeCompare(b.jamMulai));
+    const js = jadwalOn(S.g.Jadwal, d).sort((a, b) => a.jamMulai.localeCompare(b.jamMulai));
     const used = [];
     const chips = js.map(j => {
       const x = sesiOfJadwal(ses, d, j); if (x) used.push(x.key);
       const st = x ? 'done' : d > today ? 'future' : 'todo';
       return `<button class="wk-cls ${st}" ${st === 'future' ? 'disabled' : ''} onclick="gOpenSesi('${d}','${j.id}','${esc(j.jamMulai)}')">
-        <b>${esc(j.jamMulai)}</b> ${esc(j.tipe || '')}<span>${x ? `✓ ${x.siswa.length} hadir` : st === 'future' ? `${swIdsOf(j).length} anak` : 'belum diisi'}${j.lokasi ? ' · ' + esc(j.lokasi) : ''}</span></button>`;
+        <b>${esc(j.jamMulai)}</b> ${esc(j.tipe || '')}${j.mapel ? ' · ' + esc(j.mapel) : ''}<span>${x ? `✓ ${x.siswa.length} hadir` : st === 'future' ? `${swIdsOf(j).length} anak` : 'belum diisi'}${j.lokasi ? ' · ' + esc(j.lokasi) : ''}</span></button>`;
     }).join('');
     const extra = ses.filter(x => x.tanggal === d && !used.includes(x.key)).map(x => `<button class="wk-cls done extra" onclick="gOpenSesi('${d}','','${esc(x.jam)}')"><b>${esc(x.jam || '-')}</b> Sesi tambahan<span>✓ ${x.siswa.length} hadir</span></button>`).join('');
     return `<div class="wk-day ${d === today ? 'today' : ''}"><div class="wk-h"><b>${HARI[new Date(d + 'T12:00').getDay()].slice(0, 3)}</b> ${+d.slice(8)} ${BULAN[+d.slice(5, 7) - 1].slice(0, 3)}</div>${chips + extra || '<div class="wk-empty">—</div>'}</div>`;
@@ -3031,7 +3205,7 @@ function gTabSiswa() {
   const q = (S.f.gsq || '').toLowerCase();
   const list = S.g.siswa.filter(s => (q ? true : s.diajar) && (!q || (s.nama + ' ' + (s.panggilan || '') + ' ' + s.id).toLowerCase().includes(q)));
   return `<div class="card"><div class="card-head"><h3>${q ? 'Hasil pencarian' : `Anak yang saya ajar (${list.length})`}</h3><div class="spacer"></div><input class="input" style="max-width:240px" placeholder="🔍 Cari semua murid…" value="${esc(S.f.gsq || '')}" onchange="S.f.gsq=this.value;renderGuru()"></div>
-    ${list.map(s => { const js = S.g.Jadwal.filter(j => swIdsOf(j).includes(s.id)); const last = S.g.Perkembangan.filter(p => p.siswaId === s.id).sort((a, b) => b.tanggal.localeCompare(a.tanggal))[0]; return `<div class="li" style="align-items:flex-start"><div class="avatar">${initials(s.nama)}</div><div class="meta"><b>${esc(s.nama)}${s.panggilan ? ` (${esc(s.panggilan)})` : ''}</b><span class="small muted">${esc(kelasLabel(s))} · ${esc(s.paket || '-')}${s.homeVisit === 'Ya' ? ' · home visit' : ''}${js.length ? ' · ' + js.map(j => `${j.hari} ${j.jamMulai}`).join(', ') : ''}</span>${last ? `<div class="small" style="margin-top:2px">📝 ${fmtDate(last.tanggal)}: ${esc(last.deskripsi)}</div>` : ''}</div></div>`; }).join('') || '<div class="empty">Tidak ada siswa</div>'}</div>`;
+    ${list.map(s => { const js = S.g.Jadwal.filter(j => !j.tanggal && swIdsOf(j).includes(s.id)); const last = S.g.Perkembangan.filter(p => p.siswaId === s.id).sort((a, b) => b.tanggal.localeCompare(a.tanggal))[0]; return `<div class="li" style="align-items:flex-start"><div class="avatar">${initials(s.nama)}</div><div class="meta"><b>${esc(s.nama)}${s.panggilan ? ` (${esc(s.panggilan)})` : ''}</b><span class="small muted">${esc(kelasLabel(s))} · ${esc(s.paket || '-')}${s.homeVisit === 'Ya' ? ' · home visit' : ''}${js.length ? ' · ' + js.map(j => `${j.hari} ${j.jamMulai}`).join(', ') : ''}</span>${last ? `<div class="small" style="margin-top:2px">📝 ${fmtDate(last.tanggal)}: ${esc(last.deskripsi)}</div>` : ''}</div></div>`; }).join('') || '<div class="empty">Tidak ada siswa</div>'}</div>`;
 }
 function gTabGaji() {
   const rows = [...(S.g.Gaji || [])].sort((a, b) => b.periode.localeCompare(a.periode));
@@ -3077,7 +3251,7 @@ function renderOrtu() {
     </div>
     <div class="grid g2">
       <div class="card"><div class="card-head"><h3>Perkembangan terbaru</h3><div class="spacer"></div>${harian.length > 3 ? `<button class="btn sm ghost" onclick="S.tab.ortu='harian';renderOrtu()">Semua</button>` : ''}</div>${harian.slice(0, 3).map(harianItem).join('') || '<div class="empty">Belum ada catatan dari guru</div>'}</div>
-      <div class="card"><h3>Jadwal les</h3>${S.me.Jadwal.map(j => `<div class="li"><div class="avatar" style="background:var(--green-50)">${esc(j.hari.slice(0, 2))}</div><div class="meta"><b>${esc(j.hari)}, ${esc(j.jamMulai)}–${esc(j.jamSelesai)}</b><span class="small muted">${esc(j.tipe)} · ${esc(j.guruNama)}${j.lokasi ? ' · ' + esc(j.lokasi) : ''}</span></div></div>`).join('') || '<div class="empty">Belum ada jadwal</div>'}</div>
+      <div class="card"><h3>Jadwal les</h3>${S.me.Jadwal.filter(j => !j.tanggal || j.tanggal >= todayStr()).sort((a, b) => (a.tanggal ? 1 : 0) - (b.tanggal ? 1 : 0) || String(a.tanggal || '').localeCompare(String(b.tanggal || '')) || HARI.indexOf(a.hari) - HARI.indexOf(b.hari)).slice(0, 14).map(j => `<div class="li"><div class="avatar" style="background:var(--green-50)">${esc((j.tanggal ? String(+j.tanggal.slice(8)) : j.hari.slice(0, 2)))}</div><div class="meta"><b>${esc(j.tanggal ? dayName(j.tanggal) + ', ' + fmtDate(j.tanggal) : 'Tiap ' + j.hari)}, ${esc(j.jamMulai)}–${esc(j.jamSelesai)}</b><span class="small muted">${esc(j.tipe)}${j.mapel ? ' · ' + esc(j.mapel) : ''} · ${esc(j.guruNama)}${j.lokasi ? ' · ' + esc(j.lokasi) : ''}</span></div></div>`).join('') || '<div class="empty">Belum ada jadwal</div>'}</div>
     </div>`;
   } else if (t === 'bayar') {
     const all = lg.list.filter(e => e.billed || e.paid).reverse().slice(0, 12);
