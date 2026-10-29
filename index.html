@@ -339,6 +339,7 @@ table.t{width:100%;border-collapse:collapse;font-size:14px}
 .bayar-qr{display:flex;flex-direction:column;align-items:center;gap:2px}.bayar-qr img{width:130px;height:auto;background:#fff;border-radius:8px;padding:4px;border:1.5px solid var(--ink)}.bayar-qr span{font-size:11px;font-weight:800}
 .qsearch{position:relative;flex:1;max-width:320px}.qsearch .input{padding:8px 12px}
 .qres:empty{display:none}
+.pick{position:relative}.pick .qres{top:calc(100% + 4px);max-height:300px;z-index:80}.pick .qres button.on{background:var(--green-50)}.pick .qres button.first{background:var(--yellow-50)}.input.warn{border-color:var(--red)}
 .qres{position:absolute;left:0;right:0;top:calc(100% + 6px);background:#fff;border:2px solid var(--ink);border-radius:14px;box-shadow:var(--sh-sm);z-index:60;max-height:360px;overflow:auto}
 .qres button{display:flex;width:100%;gap:10px;align-items:center;text-align:left;padding:8px 12px;border:0;border-bottom:1px dashed var(--line);background:none;cursor:pointer;font:inherit}.qres button:hover{background:var(--yellow-50)}
 @media (max-width:900px){.topbar{flex-wrap:wrap;row-gap:8px}.qsearch{order:10;flex:1 1 100%;max-width:none}.user-pill .nm{display:none}}
@@ -1313,20 +1314,38 @@ async function saveRow(t, row) { const r = await call('save', { table: t, row })
 async function saveRows(t, rows) { const r = await call('saveMany', { table: t, rows }); replaceRows(t, r.rows); return r.rows; }
 async function removeRow(t, id) { await call('remove', { table: t, id }); S.db[t] = D(t).filter(x => x.id !== id); }
 const loginChip = (id, pass, lbl) => `<span class="login-chip"><span>ID</span><b>${esc(id)}</b><span>${lbl}</span><b>${esc(pass || '-')}</b></span>`;
-/* kolom pilih dengan ketik nama (cari): hidden name=ID + input + datalist. items: [[id, label]] */
+/* kolom pilih dengan ketik nama (cari) — tampilan seperti cari cepat di atas.
+   items: [[id, nama, keterangan, badgeHtml, warnaAvatar]] · nilai tersimpan di input hidden name=... */
 function pickBox(name, items, sel, ph = 'ketik nama…') {
-  const lid = 'dl' + name + Math.random().toString(36).slice(2, 7), cur = items.find(i => i[0] === sel);
-  return `<input type="hidden" name="${name}" value="${esc(cur ? sel : '')}"><input class="input" list="${lid}" autocomplete="off" placeholder="${esc(ph)}" value="${cur ? esc(cur[1] + ' (' + cur[0] + ')') : ''}" onfocus="this.select()" oninput="pickSet(this)" onchange="pickSet(this)"><datalist id="${lid}">${items.map(([id, l]) => `<option value="${esc(l)} (${id})"></option>`).join('')}</datalist>`;
+  const key = 'pk' + Math.random().toString(36).slice(2, 8), cur = items.find(i => i[0] === sel);
+  (S._pick = S._pick || {})[key] = items;
+  return `<div class="pick"><input type="hidden" name="${name}" value="${esc(cur ? sel : '')}"><input class="input" data-pick="${key}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(ph)}" value="${cur ? esc(cur[1]) : ''}"
+    oninput="pickSearch(this)" onfocus="this.select();pickSearch(this)" onblur="setTimeout(()=>pickClose(this),180)" onkeydown="pickKey(event,this)"><div class="qres pick-res"></div></div>`;
 }
-function pickSet(inp) {
-  const v = inp.value.trim(), hid = inp.previousElementSibling, re = /\(([A-Z]+\d+)\)\s*$/;
-  let id = (v.match(re) || [])[1] || '';
-  if (!id && v) { const lo = v.toLowerCase(), o = [...inp.list.options].map(x => x.value).filter(x => { const t = x.replace(re, '').trim().toLowerCase(); return t === lo || t.split(' · ')[0] === lo; }); if (o.length === 1) id = o[0].match(re)[1]; }
-  if (hid.value !== id) { hid.value = id; hid.dispatchEvent(new Event('change', { bubbles: true })); }
+const pickNorm = v => String(v || '').toLowerCase().replace(/\s+/g, ' ').trim();
+function pickSearch(inp) {
+  const items = S._pick[inp.dataset.pick] || [], q = pickNorm(inp.value), hid = inp.previousElementSibling, box = inp.nextElementSibling;
+  const cur = items.find(i => i[0] === hid.value);
+  if (!cur || pickNorm(cur[1]) !== q) {                     // teks berubah → cocokkan persis nama / ID
+    const ex = items.filter(i => pickNorm(i[1]) === q || i[0].toLowerCase() === q);
+    pickVal(inp, ex.length === 1 ? ex[0][0] : '');
+  }
+  const words = q.split(' ').filter(Boolean), sel = hid.value;
+  const hits = (cur && pickNorm(cur[1]) === q ? [cur].concat(items.filter(i => i !== cur)) : items.filter(i => words.every(w => pickNorm(i[1] + ' ' + i[0] + ' ' + (i[2] || '')).includes(w)))).slice(0, 40);
+  S._pickHits = hits;
+  box.innerHTML = hits.map((i, k) => `<button type="button" class="${i[0] === sel ? 'on' : ''} ${k === 0 && i[0] !== sel ? 'first' : ''}" onmousedown="event.preventDefault();pickChoose('${inp.dataset.pick}','${i[0]}')"><span class="avatar" style="width:30px;height:30px;font-size:11px;flex:none${i[4] ? ';background:' + i[4] : ''}">${initials(i[1])}</span><span style="flex:1;min-width:0"><b>${esc(i[1])}</b>${i[2] ? `<br><span class="small muted">${esc(i[2])}</span>` : ''}</span>${i[3] || ''}</button>`).join('')
+    || `<div class="small muted" style="padding:10px 12px">Tidak ditemukan</div>`;
 }
+function pickVal(inp, id) { const hid = inp.previousElementSibling; if (hid.value !== id) { hid.value = id; hid.dispatchEvent(new Event('change', { bubbles: true })); } }
+function pickChoose(key, id) {
+  const inp = document.querySelector(`[data-pick="${key}"]`); if (!inp) return;
+  const it = (S._pick[key] || []).find(i => i[0] === id); inp.value = it ? it[1] : ''; pickVal(inp, id); pickClose(inp); inp.blur();
+}
+function pickClose(inp) { const box = inp && inp.nextElementSibling; if (box) box.innerHTML = ''; const hid = inp && inp.previousElementSibling; if (inp && hid && !hid.value && inp.value) inp.classList.add('warn'); else if (inp) inp.classList.remove('warn'); }
+function pickKey(e, inp) { if (e.key === 'Enter') { e.preventDefault(); const h = S._pickHits || []; if (h.length && inp.nextElementSibling.innerHTML) pickChoose(inp.dataset.pick, h[0][0]); } else if (e.key === 'Escape') pickClose(inp); }
 const guruAbc = list => (list || D('Guru')).slice().sort((a, b) => String(a.nama).localeCompare(String(b.nama), 'id', { sensitivity: 'base' }));
-const guruItems = list => guruAbc(list).map(g => [g.id, g.nama]);
-const siswaItems = list => list.slice().sort((a, b) => a.nama.localeCompare(b.nama)).map(x => [x.id, x.nama + (x.kelas || x.jenjang ? ' · ' + kelasLabel(x) : '')]);
+const guruItems = list => guruAbc(list).map(g => [g.id, g.nama, `Guru ${g.id} · ${levelOf(g)}${g.mapel ? ' · ' + g.mapel : ''}`, g.status === 'Nonaktif' ? stBadge('Nonaktif') : '', 'var(--pink-50)']);
+const siswaItems = list => list.filter(Boolean).slice().sort((a, b) => a.nama.localeCompare(b.nama)).map(x => [x.id, x.nama, `${x.id} · ${kelasLabel(x)} · ${paketNama(x) || x.paketDiminta || '-'}`, stBadge(x.status)]);
 const optList = (arr, v) => arr.map(x => { const [val, lab] = Array.isArray(x) ? x : [x, x]; return `<option value="${esc(val)}" ${String(v) === String(val) ? 'selected' : ''}>${esc(lab)}</option>`; }).join('');
 
 /* ================= FEE TENTOR (terpisah dari paket ortu) =================
