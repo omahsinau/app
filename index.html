@@ -1321,9 +1321,11 @@ function pickBox(name, items, sel, ph = 'ketik nama…') {
 function pickSet(inp) {
   const v = inp.value.trim(), hid = inp.previousElementSibling, re = /\(([A-Z]+\d+)\)\s*$/;
   let id = (v.match(re) || [])[1] || '';
-  if (!id && v) { const lo = v.toLowerCase(), o = [...inp.list.options].map(x => x.value).filter(x => { const t = x.toLowerCase().replace(re, '').trim(); return t === lo || t.split(' · ')[0] === lo; }); if (o.length === 1) id = o[0].match(re)[1]; }
+  if (!id && v) { const lo = v.toLowerCase(), o = [...inp.list.options].map(x => x.value).filter(x => { const t = x.replace(re, '').trim().toLowerCase(); return t === lo || t.split(' · ')[0] === lo; }); if (o.length === 1) id = o[0].match(re)[1]; }
   if (hid.value !== id) { hid.value = id; hid.dispatchEvent(new Event('change', { bubbles: true })); }
 }
+const guruAbc = list => (list || D('Guru')).slice().sort((a, b) => String(a.nama).localeCompare(String(b.nama), 'id', { sensitivity: 'base' }));
+const guruItems = list => guruAbc(list).map(g => [g.id, g.nama]);
 const siswaItems = list => list.slice().sort((a, b) => a.nama.localeCompare(b.nama)).map(x => [x.id, x.nama + (x.kelas || x.jenjang ? ' · ' + kelasLabel(x) : '')]);
 const optList = (arr, v) => arr.map(x => { const [val, lab] = Array.isArray(x) ? x : [x, x]; return `<option value="${esc(val)}" ${String(v) === String(val) ? 'selected' : ''}>${esc(lab)}</option>`; }).join('');
 
@@ -1793,7 +1795,7 @@ function pgJadwal() {
   const t = S.tab.jd || 'minggu', nTgl = D('Jadwal').filter(j => j.tanggal && j.tanggal >= todayStr()).length;
   const gf = S.f.jdG || '';
   const head = `<div class="row" style="margin-bottom:10px">${tabs('jd', [['minggu', 'Mingguan (tiap hari)'], ['tanggal', `Per tanggal${nTgl ? ' (' + nTgl + ')' : ''}`]], 'minggu')}<div class="spacer"></div>
-    <select class="input" style="max-width:220px" onchange="setF('jdG',this.value)"><option value="">Semua guru</option>${D('Guru').filter(g => D('Jadwal').some(j => j.guruId === g.id)).map(g => `<option value="${g.id}" ${gf === g.id ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select>
+    <select class="input" style="max-width:220px" onchange="setF('jdG',this.value)"><option value="">Semua guru</option>${guruAbc().filter(g => D('Jadwal').some(j => j.guruId === g.id)).map(g => `<option value="${g.id}" ${gf === g.id ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select>
     <button class="btn" onclick="formJadwal('', ${t === 'tanggal' ? 'true' : 'false'})">${ic('plus')} Tambah Jadwal</button></div>`;
   return head + (t === 'tanggal' ? jadwalTanggal(gf) : jadwalMingguan(gf));
 }
@@ -1834,7 +1836,7 @@ function formJadwal(id, dated) {
     <div class="field"><label>Tipe kelas</label><select class="input" name="tipe">${optList([...new Set(tipeKelasList().concat(j.tipe ? [j.tipe] : []))], j.tipe)}</select></div>
     <div class="field"><label>Jam mulai</label><input class="input" type="time" name="jamMulai" value="${esc(j.jamMulai)}"></div>
     <div class="field"><label>Jam selesai</label><input class="input" type="time" name="jamSelesai" value="${esc(j.jamSelesai)}"></div>
-    <div class="field"><label>Guru/tentor (ketik untuk cari)</label><input class="input" name="guruPick" list="dlGuru" autocomplete="off" placeholder="ketik nama guru…" value="${gj ? esc(gj.nama + ' (' + gj.id + ')') : ''}" onfocus="this.select()"><datalist id="dlGuru">${D('Guru').filter(g => g.status !== 'Nonaktif' || g.id === j.guruId).map(g => `<option value="${esc(g.nama)} (${g.id})">`).join('')}</datalist></div>
+    <div class="field"><label>Guru/tentor (ketik untuk cari)</label><input class="input" name="guruPick" list="dlGuru" autocomplete="off" placeholder="ketik nama guru…" value="${gj ? esc(gj.nama + ' (' + gj.id + ')') : ''}" onfocus="this.select()"><datalist id="dlGuru">${guruAbc().filter(g => g.status !== 'Nonaktif' || g.id === j.guruId).map(g => `<option value="${esc(g.nama)} (${g.id})">`).join('')}</datalist></div>
     <div class="field"><label>Lokasi</label><select class="input" name="lokasi"><option value="">—</option>${optList([...new Set(listOf('lokasiList').concat(j.lokasi ? [j.lokasi] : []))], j.lokasi)}</select></div>
     <div class="field"><label>Mapel / materi (opsional)</label><input class="input" name="mapel" list="dlMapel" value="${esc(j.mapel || '')}" placeholder="mis. Matematika"><datalist id="dlMapel">${(typeof mapelList === 'function' ? mapelList() : []).map(m => `<option value="${esc(m)}">`).join('')}</datalist></div>
     <div class="field full"><label>Daftar siswa <input class="input" style="display:inline-block;width:180px;padding:4px 9px;margin-left:8px" placeholder="cari…" oninput="$$('#swPick label').forEach(l=>l.style.display=l.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')"></label><div id="swPick" style="max-height:240px;overflow:auto;border:2px solid var(--line);border-radius:12px;padding:8px 12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:4px;background:#fff">
@@ -1885,7 +1887,7 @@ function sesiList() {
     <div class="chips"><button class="chip ${today ? 'on' : ''}" onclick="setF('ssDay','1')">Hari ini</button><button class="chip ${!today ? 'on' : ''}" onclick="setF('ssDay','')">Per bulan</button></div>
     ${today ? '' : `<select class="input" style="max-width:190px" onchange="setF('ssP',this.value)">${monthOptions(p)}</select>`}
     <input class="input" style="max-width:200px" placeholder="Cari guru / siswa…" value="${esc(S.f.ssQ || '')}" onchange="setF('ssQ',this.value)">
-    <select class="input" style="max-width:220px" onchange="setF('ssG',this.value)"><option value="">Semua guru</option>${D('Guru').filter(g => g.status !== 'Nonaktif').map(g => `<option value="${g.id}" ${gid === g.id ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select>
+    <select class="input" style="max-width:220px" onchange="setF('ssG',this.value)"><option value="">Semua guru</option>${guruAbc().filter(g => g.status !== 'Nonaktif').map(g => `<option value="${g.id}" ${gid === g.id ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select>
     <div class="spacer"></div><button class="btn ghost" onclick="csvSesi('${p}')">${ic('download')} CSV</button><button class="btn" onclick="formSesi()">${ic('plus')} Tambah Sesi</button></div>
   <p class="small muted" style="margin-bottom:8px">Sesi diisi guru lewat Portal Guru: tanggal, jam, dan centang siswa yang hadir. Siswa yang hadir menjadi dasar honor guru & kehadiran di raport.</p>
   <div class="table-wrap"><table class="t"><thead><tr><th>Tanggal</th><th>Jam</th><th>Guru</th><th>Siswa hadir</th><th class="c">Jumlah</th><th></th></tr></thead><tbody>
@@ -1895,13 +1897,13 @@ function sesiList() {
   </tbody></table></div></div>`;
 }
 function formSesi(i) {
-  const x = i != null ? Object.assign({}, S._sesi[i], { dur: durasiOf(D('Absensi').find(a => sesiKey(a) === S._sesi[i].key)) }) : { guruId: (D('Guru').find(g => g.status !== 'Nonaktif') || {}).id, tanggal: todayStr(), jam: '', siswa: [], dur: 1 };
+  const x = i != null ? Object.assign({}, S._sesi[i], { dur: durasiOf(D('Absensi').find(a => sesiKey(a) === S._sesi[i].key)) }) : { guruId: '', tanggal: todayStr(), jam: '', siswa: [], dur: 1 };
   S._sesiEdit = i != null ? { guruId: x.guruId, tanggal: x.tanggal, jam: x.jam } : null;
-  modal(i != null ? 'Edit Sesi' : 'Tambah Sesi', `<form id="fSesi" class="form-grid" onsubmit="event.preventDefault();saveSesiAdmin()">
+  modal(i != null ? 'Edit Sesi' : 'Tambah Sesi', `<form id="fSesi" class="form-grid" onsubmit="event.preventDefault();saveSesiAdmin()" onchange="if(event.target.name==='guruId')sesiHint()">
     <div class="field"><label>Tanggal</label><input class="input" type="date" name="tanggal" value="${esc(x.tanggal)}" onchange="sesiHint()"></div>
     <div class="field"><label>Jam mulai</label><input class="input" type="time" name="jam" value="${esc(x.jam)}"></div>
     <div class="field"><label>Durasi</label><select class="input" name="durasi">${DURASI_OPS.map(d => `<option value="${d}" ${d === (x.dur || 1) ? 'selected' : ''}>${fmtJam(d)} jam</option>`).join('')}</select></div>
-    <div class="field"><label>Guru</label><select class="input" name="guruId" onchange="sesiHint()">${D('Guru').filter(g => g.status !== 'Nonaktif' || g.id === x.guruId).map(g => `<option value="${g.id}" ${g.id === x.guruId ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select></div>
+    <div class="field"><label>Guru (ketik nama)</label>${pickBox('guruId', guruItems(D('Guru').filter(g => g.status !== 'Nonaktif' || g.id === x.guruId)), x.guruId, 'ketik nama guru…')}</div>
     <div class="full" id="sesiHint"></div>
     <div class="field full"><label>Siswa yang hadir <input class="input" style="display:inline-block;width:180px;padding:4px 9px;margin-left:8px" placeholder="cari…" oninput="$$('#swPick label').forEach(l=>l.style.display=l.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')"></label>
       <div id="swPick" style="max-height:260px;overflow:auto;border:2px solid var(--line);border-radius:12px;padding:8px 12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:4px;background:#fff">
@@ -1922,6 +1924,7 @@ function sesiPakaiJadwal(jid) {
 }
 async function saveSesiAdmin() {
   const f = formData($('#fSesi')); const ids = $$('#fSesi input[name=sw]:checked').map(x => x.value);
+  if (!f.guruId) return toast('Pilih guru dari daftar (ketik nama lalu klik namanya)', true);
   if (!ids.length) return toast('Centang minimal satu siswa yang hadir', true);
   const old = S._sesiEdit;
   try {
@@ -1988,23 +1991,23 @@ function pgHarian() {
   return `<div class="card"><div class="card-head">
     <select class="input" style="max-width:180px" onchange="setF('phP',this.value)">${monthOptions(p)}</select>
     <select class="input" style="max-width:220px" onchange="setF('phS',this.value)"><option value="">Semua siswa</option>${siswaAktif().map(s => `<option value="${s.id}" ${sid === s.id ? 'selected' : ''}>${esc(s.nama)}</option>`).join('')}</select>
-    <select class="input" style="max-width:200px" onchange="setF('phG',this.value)"><option value="">Semua guru</option>${D('Guru').map(g => `<option value="${g.id}" ${gid === g.id ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select>
+    <select class="input" style="max-width:200px" onchange="setF('phG',this.value)"><option value="">Semua guru</option>${guruAbc().map(g => `<option value="${g.id}" ${gid === g.id ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select>
     <div class="spacer"></div><button class="btn" onclick="formHarian()">${ic('plus')} Tambah Catatan</button></div>
     <p class="small muted" style="margin-bottom:8px">Catatan ditulis guru lewat Portal Guru, tampil di Portal Orang Tua, dan jadi bahan raport bulanan.</p>
     ${rows.map(x => `<div class="li" style="align-items:flex-start"><div class="avatar" style="background:var(--purple-50)">${initials(siswaById(x.siswaId).nama)}</div><div class="meta"><b>${esc(siswaById(x.siswaId).nama)} ${x.materi ? `<span class="badge b-purple">${esc(x.materi)}</span>` : ''}</b><div style="white-space:pre-line">${esc(x.deskripsi)}</div><span class="small muted">${dayName(x.tanggal)}, ${fmtDate(x.tanggal)} · ${esc(guruById(x.guruId).nama)}</span></div><button class="icon-btn" onclick="formHarian('${x.id}')">${ic('edit')}</button><button class="icon-btn" onclick="delHarian('${x.id}')">${ic('trash')}</button></div>`).join('') || '<div class="empty">Belum ada catatan perkembangan di bulan ini</div>'}
   </div>`;
 }
 function formHarian(id) {
-  const x = id ? D('Perkembangan').find(r => r.id === id) : { tanggal: todayStr(), siswaId: '', guruId: (D('Guru')[0] || {}).id, materi: '', deskripsi: '' };
+  const x = id ? D('Perkembangan').find(r => r.id === id) : { tanggal: todayStr(), siswaId: '', guruId: '', materi: '', deskripsi: '' };
   modal(id ? 'Edit Perkembangan Harian' : 'Tambah Perkembangan Harian', `<form id="fPH" class="form-grid" onsubmit="event.preventDefault();saveHarian('${id || ''}')">
     <div class="field"><label>Tanggal</label><input class="input" type="date" name="tanggal" value="${esc(x.tanggal)}"></div>
-    <div class="field"><label>Guru</label><select class="input" name="guruId">${D('Guru').map(g => `<option value="${g.id}" ${g.id === x.guruId ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select></div>
+    <div class="field"><label>Guru (ketik nama)</label>${pickBox('guruId', guruItems(), x.guruId, 'ketik nama guru…')}</div>
     <div class="field"><label>Siswa (ketik nama)</label>${pickBox('siswaId', siswaItems(siswaAktif().concat(x.siswaId && !siswaAktif().some(z => z.id === x.siswaId) ? [siswaById(x.siswaId)] : [])), x.siswaId, 'ketik nama siswa…')}</div>
     <div class="field"><label>Materi / mapel</label><input class="input" name="materi" placeholder="contoh: Matematika — pecahan" value="${esc(x.materi || '')}"></div>
     <div class="field full"><label>Deskripsi perkembangan</label><textarea class="input" name="deskripsi" required>${esc(x.deskripsi)}</textarea></div>
   </form>`, `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="$('#fPH').requestSubmit()">Simpan</button>`);
 }
-async function saveHarian(id) { const f = formData($('#fPH')); if (!f.siswaId) return toast('Pilih siswa dari daftar (ketik lalu klik namanya)', true); try { await saveRow('Perkembangan', Object.assign(id ? { id } : {}, f)); closeModal(); toast('Tersimpan'); renderPage(); } catch (e) { toast(e.message, true); } }
+async function saveHarian(id) { const f = formData($('#fPH')); if (!f.siswaId) return toast('Pilih siswa dari daftar (ketik lalu klik namanya)', true); if (!f.guruId) return toast('Pilih guru dari daftar (ketik lalu klik namanya)', true); try { await saveRow('Perkembangan', Object.assign(id ? { id } : {}, f)); closeModal(); toast('Tersimpan'); renderPage(); } catch (e) { toast(e.message, true); } }
 function delHarian(id) { confirmBox('Hapus catatan ini?', async () => { await removeRow('Perkembangan', id); renderPage(); }); }
 
 /* ================= RAPORT BULANAN ================= */
@@ -2105,7 +2108,7 @@ function formRaport(sid, p) {
     <div class="field"><label>Dari total pertemuan <span class="muted">(opsional)</span></label><input class="input" name="pertemuan" inputmode="numeric" value="${esc(a.pertemuan || '')}"></div>
     <div class="field full"><label>A. Hasil dan Pencapaian</label><textarea class="input" name="hasil" style="min-height:110px">${esc(a.hasil || '')}</textarea></div>
     <div class="field full"><label>B. Arahan pembelajaran</label><textarea class="input" name="arahan" style="min-height:90px">${esc(a.arahan || '')}</textarea></div>
-    <div class="field"><label>Guru penulis</label><select class="input" name="guruId">${D('Guru').map(g => `<option value="${g.id}" ${g.id === (a.guruId || (D('Jadwal').find(j => j.siswaIds.includes(sid)) || {}).guruId) ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select></div>
+    <div class="field"><label>Guru penulis</label><select class="input" name="guruId">${guruAbc().map(g => `<option value="${g.id}" ${g.id === (a.guruId || (D('Jadwal').find(j => j.siswaIds.includes(sid)) || {}).guruId) ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select></div>
     <div class="field"><label>Tanggal tanda tangan</label><input class="input" type="date" name="tanggal" value="${esc(a.tanggal || todayStr())}"></div>
     <div class="field full"><label>Status</label><select class="input" name="status">${optList([['Terbit', 'Terbit — tampil di Portal Orang Tua'], ['Draft', 'Draft — belum tampil']], a.status || 'Terbit')}</select></div>
     ${harianRef(sid, p, D('Perkembangan'), x => guruById(x.guruId).nama)}
