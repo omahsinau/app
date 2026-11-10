@@ -264,7 +264,9 @@ table.t{width:100%;border-collapse:collapse;font-size:14px}
 .kw-amt .box{display:inline-block;border-top:2px solid #57B45A;border-bottom:2px solid #57B45A;padding:6px 14px;font-weight:800;font-size:16px;background:#F5F5F5}
 .kw-sign{width:230px;text-align:center;font-size:13.5px}
 .kw-sign .ttd{height:70px;display:grid;place-items:center;margin:2px 0}
-.kw-sign .ttd img{max-height:70px;max-width:200px}
+.kw-sign .ttd{position:relative}.kw-sign .ttd img{max-height:70px;max-width:200px;position:relative;z-index:1}
+.kw-sign .ttd img.kw-stempel{position:absolute;z-index:0;left:-6px;top:50%;width:100px;height:100px;max-height:none;max-width:none;margin-top:-44px;transform:rotate(-12deg);opacity:.8}
+.kw .num{font-variant-numeric:normal}
 .kw .lunas{position:absolute;left:41%;bottom:64px;transform:rotate(-14deg);border:3px solid #3FA34D;color:#3FA34D;border-radius:10px;padding:2px 14px;font-weight:800;font-size:22px;letter-spacing:2px;opacity:.28}
 @media(max-width:560px){.kw{padding:20px 16px 48px}.kw-org{display:none}.kw-top img{width:54px;height:54px}.kw-title h1{font-size:24px}.kw-amt{padding-left:0}.kw-bottom{flex-direction:column;align-items:stretch}.kw-sign{width:auto}.kw-rows td:first-child{width:110px}}
 
@@ -641,6 +643,33 @@ function groupSesi(rows) {
 }
 
 /* ---------------- DOKUMEN: kuitansi, tagihan, raport, slip ---------------- */
+/* stempel kuitansi: gambar unggahan owner, atau stempel bulat otomatis (digambar di canvas → aman untuk "Kirim gambar") */
+function stempelOf(st) {
+  st = st || {};
+  if (st.stempel) return st.stempel;
+  if (st.stempelAuto === 'Tidak') return '';
+  const top = String(st.namaLembaga || 'Bimbingan Belajar Omah Sinau').toUpperCase(), mid = String(st.singkatan || 'OSIN').toUpperCase(), bot = String(st.kota || '').toUpperCase();
+  const key = [top, mid, bot].join('|'); if (S._stamp && S._stamp.k === key) return S._stamp.v;
+  let v = '';
+  try {
+    const W = 300, c = document.createElement('canvas'); c.width = c.height = W; const x = c.getContext('2d'), R = W / 2, ink = '#2f45a8';
+    x.strokeStyle = x.fillStyle = ink; x.translate(R, R);
+    x.lineWidth = 7; x.beginPath(); x.arc(0, 0, R - 6, 0, Math.PI * 2); x.stroke();
+    x.lineWidth = 3; x.beginPath(); x.arc(0, 0, R - 50, 0, Math.PI * 2); x.stroke();
+    const ring = (txt, r, size, bottom) => {
+      x.font = `800 ${size}px Arial, sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle';
+      const chars = [...txt], ws = chars.map(ch => x.measureText(ch).width + size * .1), tot = ws.reduce((a, b) => a + b, 0), span = Math.min(tot / r, Math.PI * (bottom ? .6 : 1.15)), k = span / tot;
+      let a = bottom ? span / 2 : -span / 2;
+      chars.forEach((ch, i) => { const d = ws[i] * k * (bottom ? -1 : 1); a += d / 2; x.save(); x.rotate(a); x.translate(0, bottom ? r : -r); x.fillText(ch, 0, 0); x.restore(); a += d / 2; });
+    };
+    ring(top, R - 28, top.length > 24 ? 19 : 23, false);
+    if (bot) ring('★ ' + bot + ' ★', R - 28, 22, true);
+    x.font = `900 ${mid.length > 5 ? 44 : 58}px Arial, sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(mid, 0, -4);
+    x.font = '700 18px Arial, sans-serif'; x.fillText('★ ★ ★', 0, 40);
+    v = c.toDataURL('image/png');
+  } catch (e) { v = ''; }
+  S._stamp = { k: key, v }; return v;
+}
 function kuitansiHtml(s, pay, st) {
   const tgl = pay.tanggalBayar || todayStr();
   return `<div class="kw">
@@ -656,7 +685,7 @@ function kuitansiHtml(s, pay, st) {
     </table>
     <div class="kw-bottom">
       <div class="kw-amt"><span>Jumlah:</span><div class="box num">${rpDec(pay.nominal)}</div></div>
-      <div class="kw-sign">${esc(st.kota || '')}, ${fmtDateLong(tgl)}<div class="ttd">${st.ttdPenerima ? `<img src="${st.ttdPenerima}" alt="">` : ''}</div>Penerima: ${esc(st.namaPenerima || '')}</div>
+      <div class="kw-sign">${esc(st.kota || '')}, ${fmtDateLong(tgl)}<div class="ttd">${stempelOf(st) ? `<img class="kw-stempel" src="${stempelOf(st)}" alt="">` : ''}${st.ttdPenerima ? `<img src="${st.ttdPenerima}" alt="">` : ''}</div>Penerima: ${esc(st.namaPenerima || '')}</div>
     </div>
     <div class="foot"></div></div>`;
 }
@@ -672,18 +701,22 @@ const durasiOf = a => { const d = parseFloat(String(a && a.durasi || '').replace
 const DURASI_OPS = [0.5, 1, 1.5, 2, 2.5, 3];
 function durJadwal(j) { if (!j) return 0; const t = x => { const m = String(x || '').match(/(\d{1,2})[:.](\d{2})/); return m ? +m[1] * 60 + +m[2] : null; }; const a = t(j.jamMulai), b = t(j.jamSelesai); return a != null && b > a ? Math.round((b - a) / 30) / 2 : 0; }
 const fmtJam = j => String(Math.round(j * 100) / 100).replace('.', ',');
+/* cara bayar: ikut satuan paket, atau diatur per siswa (s.caraBayar) — Per bulan / Per jam / Per pertemuan */
+const CARA_BAYAR = [['', 'Ikut paket'], ['Per bulan', 'Per bulan (tetap)'], ['Per pertemuan', 'Per pertemuan (× hadir)'], ['Per jam', 'Per jam (× jam hadir)']];
+const modeBayar = (s, pk) => { const v = String((s && s.caraBayar) || (pk && pk.satuan) || ''); return /jam/i.test(v) ? 'jam' : /pertemuan|sesi/i.test(v) && !(pk && pk.kategori === 'Transport' && !(s && s.caraBayar)) ? 'ptm' : 'bulan'; };
+const unitBayar = t => t.mode === 'ptm' ? 'pertemuan' : t.perJam ? 'jam' : 'bulan';
 function tarifSiswa(s, pk, tp) {
-  const tk = String(s.transportKhusus == null ? '' : s.transportKhusus).trim();
+  const tk = String(s.transportKhusus == null ? '' : s.transportKhusus).trim(), mode = modeBayar(s, pk);
   return {
-    perJam: isPerJam(pk), khusus: !!+s.sppNominal,
+    mode, perJam: mode !== 'bulan', khusus: !!+s.sppNominal,
     tarif: +s.sppNominal || (pk ? +pk.harga || 0 : 0),
     transport: s.homeVisit === 'Ya' ? (tk !== '' ? +tk || 0 : (tp ? +tp.harga || 0 : 0)) : 0
   };
 }
-const tarifLabel = t => `${rp(t.tarif)}/${t.perJam ? 'jam' : 'bulan'}${t.transport ? ' + transport ' + rp(t.transport) + '/pertemuan' : ''}`;
+const tarifLabel = t => `${rp(t.tarif)}/${unitBayar(t)}${t.transport ? ' + transport ' + rp(t.transport) + '/pertemuan' : ''}`;
 function hitungTagihan(t, abs) {
   const sesi = abs.length, jam = Math.round(sum(abs, durasiOf) * 100) / 100;
-  const les = t.perJam ? Math.round(jam * t.tarif) : t.tarif, transport = t.transport * sesi;
+  const les = t.mode === 'ptm' ? sesi * t.tarif : t.perJam ? Math.round(jam * t.tarif) : t.tarif, transport = t.transport * sesi;
   return { sesi, jam, les, transport, nominal: les + transport };
 }
 /* o = { pk, tp, abs: kehadiran siswa, spp: pembayaran les siswa, st: pengaturan, upto } */
@@ -715,7 +748,7 @@ function ledgerSiswa(s, o) {
 }
 const STATUS_BAYAR = { lunas: ['b-green', '✓ Lunas'], kurang: ['b-orange', '◐ Kurang'], belum: ['b-red', '● Belum bayar'], deposit: ['b-blue', 'Deposit'], '-': ['b-gray', '-'] };
 const bayarBadge = e => { const [c, l] = STATUS_BAYAR[e.status] || STATUS_BAYAR['-']; return `<span class="badge ${c}">${l}</span>${e.status === 'kurang' ? `<div class="small" style="color:var(--red-d)">sisa ${rp(e.sisa)}</div>` : ''}`; };
-const tagihanRincian = e => !e.tag ? '' : `${e.tag.sesi} pertemuan${e.t.perJam ? ` · ${fmtJam(e.tag.jam)} jam` : ''}`;
+const tagihanRincian = e => !e.tag ? '' : `${e.tag.sesi} pertemuan${e.t.perJam && e.t.mode !== 'ptm' ? ` · ${fmtJam(e.tag.jam)} jam` : ''}`;
 
 /* ---- cara bayar: QRIS + rekening (Pengaturan → Cara bayar) ---- */
 const waAdminOf = st => st.waAdmin || st.noWa || '';
@@ -749,16 +782,27 @@ function prepDocImage(sel, name) {
   return job;
 }
 const imgBtn = (wa, text) => { S._imgArgs = { wa: String(wa || ''), text: String(text || '') }; return `<button class="btn wa" id="btnImg" disabled onclick="sendDocImage()">${ic('wa')} Kirim gambar</button>`; };
+/* HP: bagikan gambar + teks lewat menu share (WhatsApp mengisi teks sbg caption).
+   Laptop/PC: WhatsApp desktop sering membuang teks saat berbagi file → gambar disalin ke clipboard,
+   chat WA dibuka dengan teks "Assalamu'alaikum…" sudah terisi, tinggal Ctrl+V lalu kirim. */
+const isMobileUA = () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform || ''));
 async function sendDocImage() {
   const { wa, text } = S._imgArgs || {};
   const f = S._docImg || await S._docJob;
   if (!f) return toast('Gambar belum siap', true);
-  try {
-    if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], text }); return; }
-  } catch (e) { if (e && e.name === 'AbortError') return; }
-  const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
-  toast('Gambar terunduh — lampirkan di chat WhatsApp yang terbuka');
-  if (wa) setTimeout(() => openWa(wa, text), 600);
+  if (isMobileUA()) {
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], text }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  let copied = false;
+  try { if (navigator.clipboard && window.ClipboardItem) { await navigator.clipboard.write([new ClipboardItem({ 'image/png': f })]); copied = true; } } catch (e) { console.log(e); }
+  if (!copied) { const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); }
+  if (wa) setTimeout(() => openWa(wa, text), 300);
+  modal('Kirim lewat WhatsApp', `<div class="info-box">${copied ? '✅ Gambar sudah <b>disalin</b>.' : '✅ Gambar sudah <b>terunduh</b>.'} Chat WhatsApp terbuka dengan pesan sudah terisi.</div>
+    <ol class="small" style="margin:10px 0 0 18px;line-height:1.7">${copied ? '<li>Di chat WhatsApp, tekan <b>Enter</b> untuk mengirim pesan Assalamu\'alaikum… yang sudah terisi</li><li>Lalu tekan <b>Ctrl + V</b> (Mac: ⌘ + V) di kotak ketik → gambar kuitansi muncul</li><li>Klik <b>Kirim</b></li>' : '<li>Di WhatsApp klik 📎 → Dokumen/Foto → pilih file <b>' + esc(f.name) + '</b> (folder Unduhan)</li><li>Klik <b>Kirim</b></li>'}</ol>
+    <div class="field" style="margin-top:12px"><label>Teks pesan (bila belum terisi, salin dari sini)</label><textarea class="input" rows="3" readonly onclick="this.select()">${esc(text || '')}</textarea></div>`,
+    `<button class="btn ghost" onclick="navigator.clipboard&&navigator.clipboard.writeText(${esc(JSON.stringify(text || ''))}).then(()=>toast('Teks disalin'))">Salin teks</button>${wa ? `<button class="btn wa" onclick="openWa(${esc(JSON.stringify(wa))},${esc(JSON.stringify(text || ''))})">${ic('wa')} Buka chat lagi</button>` : ''}<button class="btn" onclick="closeModal()">Selesai</button>`);
 }
 function tagihanHtml(s, periode, e, st) {
   const due = dueDateOf(s.waktuBayar || 'Awal', periode, st);
@@ -775,7 +819,7 @@ function tagihanHtml(s, periode, e, st) {
       <tr><td class="muted">Jatuh tempo</td><td><b style="color:var(--red)">${fmtDateLong(due)}</b></td></tr>
     </table>
     <table class="lines"><tbody>
-      ${line(`Les ${e.t.perJam ? 'privat' : 'bulanan'} — ${fmtPeriod(periode)}`, e.t.perJam ? `${e.tag.sesi} pertemuan · ${fmtJam(e.tag.jam)} jam × ${rp(e.t.tarif)}` : 'per bulan', rp(e.tag.les))}
+      ${line(`Les ${e.t.perJam ? 'privat' : 'bulanan'} — ${fmtPeriod(periode)}`, e.t.mode === 'ptm' ? `${e.tag.sesi} pertemuan × ${rp(e.t.tarif)}` : e.t.perJam ? `${e.tag.sesi} pertemuan · ${fmtJam(e.tag.jam)} jam × ${rp(e.t.tarif)}` : 'per bulan', rp(e.tag.les))}
       ${e.tag.transport ? line('Transport', `${e.tag.sesi} pertemuan × ${rp(e.t.transport)}`, rp(e.tag.transport)) : ''}
       ${e.carryIn ? line('Deposit / kelebihan bayar sebelumnya', '', '−' + rp(Math.min(e.carryIn, e.tag.nominal))) : ''}
       ${e.paid ? line('Sudah dibayar', e.rows.map(r => esc(r.noKuitansi)).join(', '), '−' + rp(e.paid)) : ''}
@@ -1232,16 +1276,19 @@ const Mock = (() => {
       }
       if (a === 'gantiPassword') { const g = D.Guru.find(x => x.id === s.uid); if (g.pin !== req.oldPass) return { ok: false, error: 'PIN lama salah.' }; if (String(req.newPass).length < 4) return { ok: false, error: 'Password baru minimal 4 karakter.' }; g.pin = req.newPass; save(); return { ok: true }; }
     } else {
-      const sw = D.Siswa.find(x => x.id === s.uid);
+      const own = D.Siswa.find(x => x.id === s.uid);
+      const wk = w => { let d = String(w || '').replace(/\D/g, ''); if (d.startsWith('62')) d = '0' + d.slice(2); return d.length >= 9 ? d : ''; };
+      const fam = D.Siswa.filter(r => r.id === own.id || (wk(own.waOrtu) && wk(r.waOrtu) === wk(own.waOrtu) && r.status !== 'Berhenti' && r.status !== 'Baru'));
+      const sw = a === 'me' ? (fam.find(r => r.id === req.anak) || own) : own, uid = sw.id;
       if (a === 'me') {
-        const mine = t => D[t].filter(r => r.siswaId === s.uid);
+        const mine = t => D[t].filter(r => r.siswaId === uid);
         const gn = id => (D.Guru.find(g => g.id === id) || {}).nama || '';
         const pk = D.Paket.find(p => p.id === sw.paketId) || {};
         const safe = Object.assign({}, sw); delete safe.kodeOrtu; safe.paket = pk.nama || ''; safe.tagihan = String(tagihan(sw)); safe.waktuBayar = pk.waktuBayar || 'Awal';
         safe.paketSatuan = pk.satuan || 'Per bulan'; safe.paketHarga = pk.harga || '0'; safe.transportHarga = (D.Paket.find(x => x.kategori === 'Transport' && x.aktif !== 'Tidak') || {}).harga || '0';
         const rps = mine('Raport').filter(r => r.status === 'Terbit'), bulanTerbit = rps.filter(r => r.jenis !== 'Semester').map(r => r.periode);
-        const jadwal = D.Jadwal.filter(j => j.siswaIds.split(',').includes(s.uid)).map(j => Object.assign({}, j, { siswaIds: '', guruNama: gn(j.guruId) }));
-        return { ok: true, data: J({ role: 'ortu', siswa: safe, settings: pub(D.Pengaturan), Absensi: mine('Absensi').map(r => Object.assign({}, r, { guruNama: gn(r.guruId) })), SPP: mine('SPP'), Raport: rps, Perkembangan: mine('Perkembangan').filter(p => bulanTerbit.includes(p.tanggal.slice(0, 7))).map(p => Object.assign({}, p, { guruNama: gn(p.guruId) })), Jadwal: jadwal }) };
+        const jadwal = D.Jadwal.filter(j => j.siswaIds.split(',').includes(uid)).map(j => Object.assign({}, j, { siswaIds: '', guruNama: gn(j.guruId) }));
+        return { ok: true, data: J({ role: 'ortu', siswa: safe, keluarga: fam.map(r => ({ id: r.id, nama: r.nama, panggilan: r.panggilan || '', paket: (D.Paket.find(p => p.id === r.paketId) || {}).nama || '' })), settings: pub(D.Pengaturan), Absensi: mine('Absensi').map(r => Object.assign({}, r, { guruNama: gn(r.guruId) })), SPP: mine('SPP'), Raport: rps, Perkembangan: mine('Perkembangan').filter(p => bulanTerbit.includes(p.tanggal.slice(0, 7))).map(p => Object.assign({}, p, { guruNama: gn(p.guruId) })), Jadwal: jadwal }) };
       }
       if (a === 'gantiPassword') { if (sw.kodeOrtu !== req.oldPass) return { ok: false, error: 'Kode akses lama salah.' }; if (String(req.newPass).length < 4) return { ok: false, error: 'Password baru minimal 4 karakter.' }; sw.kodeOrtu = req.newPass; save(); return { ok: true }; }
     }
@@ -1322,7 +1369,24 @@ function pickBox(name, items, sel, ph = 'ketik nama…') {
   return `<div class="pick"><input type="hidden" name="${name}" value="${esc(cur ? sel : '')}"><input class="input" data-pick="${key}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(ph)}" value="${cur ? esc(cur[1]) : ''}"
     oninput="pickSearch(this)" onfocus="this.select();pickSearch(this)" onblur="setTimeout(()=>pickClose(this),180)" onkeydown="pickKey(event,this)"><div class="qres pick-res"></div></div>`;
 }
+/* pencarian untuk saringan (filter) di atas tabel: pilih nama → langsung tersaring */
+function pickFilter(fkey, items, sel, ph, allLabel) {
+  return `<div style="width:230px;max-width:100%">` + pickBox('', [['', allLabel, 'tampilkan semua']].concat(items), sel || '', ph).replace('data-pick=', `data-fkey="${fkey}" data-pick=`) + '</div>';
+}
+function pickSet(form, name, id) { const hid = form.querySelector(`input[type=hidden][name="${name}"]`); if (!hid) return; const inp = hid.nextElementSibling, it = (S._pick[inp.dataset.pick] || []).find(i => i[0] === id); hid.value = it ? id : ''; inp.value = it ? it[1] : ''; }
 const pickNorm = v => String(v || '').toLowerCase().replace(/\s+/g, ' ').trim();
+/* cari langsung di tabel: baris <tr data-q="…">. Baris data-hide="1" (tersaring chip) tetap tampil bila cocok dengan pencarian */
+const lfMatch = (q, text) => pickNorm(q).split(' ').filter(Boolean).every(w => String(text || '').includes(w));
+function liveFilter(inp, sel) {
+  const q = pickNorm(inp.value), tb = $(sel); if (!tb) return;
+  let n = 0;
+  tb.querySelectorAll('tr[data-q]').forEach(tr => { const ok = q ? lfMatch(q, tr.dataset.q) : tr.dataset.hide !== '1'; tr.style.display = ok ? '' : 'none'; if (ok) n++; });
+  let em = tb.querySelector('tr.lf-empty');
+  if (!em) { em = document.createElement('tr'); em.className = 'lf-empty'; em.innerHTML = '<td colspan="12"><div class="empty">Tidak ditemukan</div></td>'; tb.appendChild(em); }
+  em.style.display = n || !tb.querySelector('tr[data-q]') ? 'none' : '';
+  const c = $(sel + 'N'); if (c) c.textContent = q ? n + ' cocok' : '';
+}
+const lfAttr = (text, hide, q) => { const t = pickNorm(text); return ` data-q="${esc(t)}"${hide ? ' data-hide="1"' : ''}${(q ? !lfMatch(q, t) : hide) ? ' style="display:none"' : ''}`; };
 function pickSearch(inp) {
   const items = S._pick[inp.dataset.pick] || [], q = pickNorm(inp.value), hid = inp.previousElementSibling, box = inp.nextElementSibling;
   const cur = items.find(i => i[0] === hid.value);
@@ -1340,6 +1404,7 @@ function pickVal(inp, id) { const hid = inp.previousElementSibling; if (hid.valu
 function pickChoose(key, id) {
   const inp = document.querySelector(`[data-pick="${key}"]`); if (!inp) return;
   const it = (S._pick[key] || []).find(i => i[0] === id); inp.value = it ? it[1] : ''; pickVal(inp, id); pickClose(inp); inp.blur();
+  if (inp.dataset.fkey) setF(inp.dataset.fkey, id);
 }
 function pickClose(inp) { const box = inp && inp.nextElementSibling; if (box) box.innerHTML = ''; const hid = inp && inp.previousElementSibling; if (inp && hid && !hid.value && inp.value) inp.classList.add('warn'); else if (inp) inp.classList.remove('warn'); }
 function pickKey(e, inp) { if (e.key === 'Enter') { e.preventDefault(); const h = S._pickHits || []; if (h.length && inp.nextElementSibling.innerHTML) pickChoose(inp.dataset.pick, h[0][0]); } else if (e.key === 'Escape') pickClose(inp); }
@@ -1524,7 +1589,9 @@ function pgSiswa() {
     <div class="card-head">
       <div class="chips">${['Baru', 'Aktif', 'Cuti', 'Berhenti', 'Semua'].map(x => { const n = x === 'Semua' ? D('Siswa').length : D('Siswa').filter(s => s.status === x).length; return x === 'Baru' && !n && st !== 'Baru' ? '' : `<button class="chip ${st === x ? 'on' : ''}" ${x === 'Baru' && n ? 'style="border-color:var(--blue);color:var(--blue)"' : ''} onclick="setF('siswaSt','${x}')">${x === 'Baru' ? '📝 Pendaftar baru' : x} (${n})</button>`; }).join('')}</div>
       <div class="spacer"></div>
-      <input class="input" style="max-width:220px" placeholder="Cari nama / ID…" value="${esc(S.f.q || '')}" oninput="S.f.q=this.value;$('#siswaList').innerHTML=siswaList()">
+      <input class="input" style="max-width:220px" placeholder="🔍 Cari nama / ID / ortu…" value="${esc(S.f.q || '')}" oninput="S.f.q=this.value;$('#siswaList').innerHTML=siswaList()">
+      <select class="input" style="max-width:220px" title="Saring per paket belajar" onchange="S.f.siswaPk=this.value;$('#siswaList').innerHTML=siswaList()"><option value="">Semua paket</option>${[...new Set(paketSorted().filter(x => x.kategori !== 'Transport').map(x => x.kategori))].map(k => `<option value="k:${esc(k)}" ${S.f.siswaPk === 'k:' + k ? 'selected' : ''}>— Semua ${esc(k)}</option>`).join('')}${paketSorted().filter(x => x.kategori !== 'Transport').map(x => `<option value="${x.id}" ${S.f.siswaPk === x.id ? 'selected' : ''}>${esc(x.nama)}</option>`).join('')}<option value="-" ${S.f.siswaPk === '-' ? 'selected' : ''}>Paket belum diisi</option><option value="hv" ${S.f.siswaPk === 'hv' ? 'selected' : ''}>Home visit / luar bimbel</option></select>
+      <select class="input" style="max-width:150px" title="Urutan" onchange="S.f.siswaSort=this.value;$('#siswaList').innerHTML=siswaList()">${optList([['baru', 'Terbaru dulu'], ['lama', 'Terlama dulu'], ['nama', 'Nama A–Z']], S.f.siswaSort || 'baru')}</select>
       <button class="btn ghost" onclick="shareLink('daftar=murid','Formulir pendaftaran murid baru')">${ic('link')} Link pendaftaran</button><button class="btn ghost" onclick="csvLogin('siswa')">${ic('download')} Daftar login</button><button class="btn" onclick="formSiswa()">${ic('plus')} Tambah Siswa</button>
     </div>
     <div class="table-wrap" id="siswaList">${siswaList()}</div>
@@ -1532,20 +1599,24 @@ function pgSiswa() {
 }
 function siswaList() {
   const st = S.f.siswaSt || 'Aktif', q = (S.f.q || '').toLowerCase(), p = thisPeriod();
-  const rows = D('Siswa').filter(s => (st === 'Semua' || s.status === st) && (!q || (s.nama + s.id + s.panggilan).toLowerCase().includes(q))).sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-  if (!rows.length) return `<div class="empty">${st === 'Baru' ? 'Tidak ada pendaftar baru' : 'Belum ada data siswa'}</div>`;
-  if (st === 'Baru') return `<table class="t"><thead><tr><th>Tgl daftar</th><th>Nama</th><th>Paket diminta</th><th>Tempat & jadwal</th><th>Orang tua</th><th></th></tr></thead><tbody>
+  const pk = S.f.siswaPk || '', so = S.f.siswaSort || 'baru', idN = x => +String(x.id).replace(/\D/g, '') || 0;
+  const pkOk = s => !pk || (pk === '-' ? !paketById(s.paketId) : pk === 'hv' ? s.homeVisit === 'Ya' : pk.startsWith('k:') ? (paketById(s.paketId) || {}).kategori === pk.slice(2) : s.paketId === pk);
+  const rows = D('Siswa').filter(s => (st === 'Semua' || s.status === st) && pkOk(s) && (!q || lfMatch(q, pickNorm([s.nama, s.id, s.panggilan, s.ortu, s.waOrtu, s.sekolah, s.kelompok].join(' '))))).sort(so === 'nama' ? (a, b) => a.nama.localeCompare(b.nama) : so === 'lama' ? (a, b) => idN(a) - idN(b) : (a, b) => idN(b) - idN(a));
+  if (!rows.length) return `<div class="empty">${st === 'Baru' ? 'Tidak ada pendaftar baru' : q || pk ? 'Tidak ada siswa yang cocok' : 'Belum ada data siswa'}</div>`;
+  const info = `<div class="small muted" style="padding:6px 2px">${rows.length} siswa${pk ? ' · paket: ' + esc(pk === '-' ? 'belum diisi' : pk === 'hv' ? 'home visit' : pk.startsWith('k:') ? pk.slice(2) : (paketById(pk) || {}).nama || pk) : ''}</div>`;
+  if (st === 'Baru') return info + `<table class="t"><thead><tr><th>Tgl daftar</th><th>Nama</th><th>Paket diminta</th><th>Tempat & jadwal</th><th>Orang tua</th><th></th></tr></thead><tbody>
     ${rows.sort((a, b) => (b.tglDaftar || '').localeCompare(a.tglDaftar || '')).map(s => `<tr><td class="nowrap">${fmtDate(s.tglDaftar)}<div class="small muted">${esc(s.id)}</div></td><td><b>${esc(s.nama)}</b><div class="small muted">${esc(kelasLabel(s))}${s.sekolah ? ' · ' + esc(s.sekolah) : ''}</div></td>
       <td>${esc(s.paketDiminta || '-')}</td><td class="small">${esc(s.tempatLes || '-')}<div class="muted">${esc(s.jadwalDiminta || '')}</div></td>
       <td>${esc(s.ortu || '-')}<div class="small muted">${esc(s.waOrtu || '')}${s.waSiswa ? ' · siswa ' + esc(s.waSiswa) : ''}</div></td>
       <td class="nowrap r"><button class="btn sm" onclick="formAktivasi('${s.id}')">Aktivasi</button><button class="icon-btn" title="Chat ortu" onclick="waPendaftar('${s.id}')">${ic('wa')}</button><button class="icon-btn" title="Edit" onclick="formSiswa('${s.id}')">${ic('edit')}</button><button class="icon-btn" title="Hapus" onclick="delSiswa('${s.id}')">${ic('trash')}</button></td></tr>`).join('')}</tbody></table>`;
-  return `<table class="t"><thead><tr><th>Login ortu</th><th>Nama</th><th>Paket belajar</th><th>Orang tua</th><th class="r">Biaya</th><th>Status</th><th>${BULAN[+p.slice(5) - 1].slice(0, 3)}</th><th></th></tr></thead><tbody>
+  return info + `<table class="t"><thead><tr><th>Login ortu</th><th>Nama</th><th>Daftar / mulai</th><th>Paket belajar</th><th>Orang tua</th><th class="r">Biaya</th><th>Status</th><th>${BULAN[+p.slice(5) - 1].slice(0, 3)}</th><th></th></tr></thead><tbody>
   ${rows.map(s => { const e = billOf(s, p); const pk = paketById(s.paketId); const tf = tarifOf(s); return `<tr class="${isArrear(e) ? 'unpaid' : ''}">
     <td>${loginChip(s.id, s.kodeOrtu, 'Kode')}</td>
-    <td><b>${esc(s.nama)}</b><div class="small muted">${esc(kelasLabel(s))}${s.sekolah ? ' · ' + esc(s.sekolah) : ''}</div></td>
-    <td>${pk ? `<span class="small"><b>${esc(pk.nama)}</b></span>` : '<span class="badge b-orange">Belum diisi</span>'}${s.homeVisit === 'Ya' ? ' <span class="badge b-purple">Home visit</span>' : ''}</td>
+    <td><b>${esc(s.nama)}</b><div class="small muted">${esc(kelasLabel(s))}${s.sekolah ? ' · ' + esc(s.sekolah) : ''}</div>${famBadge(s)}</td>
+    <td class="small nowrap">${s.tglDaftar ? fmtDate(s.tglDaftar) : '<span class="muted">—</span>'}<div class="muted">${s.tglMulai ? 'mulai ' + fmtDate(s.tglMulai) : ''}</div></td>
+    <td>${pk ? `<span class="small"><b>${esc(pk.nama)}</b></span>` : '<span class="badge b-orange">Belum diisi</span>'}${s.homeVisit === 'Ya' ? ' <span class="badge b-purple">Home visit</span>' : ''}${s.kelompok ? `<div class="small muted">👥 ${esc(s.kelompok)} (${D('Siswa').filter(x => x.kelompok === s.kelompok && x.status !== 'Berhenti').length} anak)</div>` : ''}</td>
     <td>${esc(s.ortu || '-')}<div class="small muted">${esc(s.waOrtu || '')}${s.waSiswa ? '<br>siswa: ' + esc(s.waSiswa) : ''}</div></td>
-    <td class="r num small">${canPay() ? `${rp(tf.tarif)}<span class="muted">/${tf.perJam ? 'jam' : 'bln'}</span>${tf.transport ? `<div class="muted">+${rp(tf.transport)}/ptm</div>` : ''}${tf.khusus ? '<div class="muted">khusus</div>' : ''}` : (tf.perJam ? 'per jam' : 'per bulan')}</td>
+    <td class="r num small">${canPay() ? `${rp(tf.tarif)}<span class="muted">/${tf.mode === 'ptm' ? 'ptm' : tf.perJam ? 'jam' : 'bln'}</span>${s.caraBayar ? '<div class="muted">cara bayar khusus</div>' : ''}${tf.transport ? `<div class="muted">+${rp(tf.transport)}/ptm</div>` : ''}${tf.khusus ? '<div class="muted">khusus</div>' : ''}` : (tf.perJam ? 'per jam' : 'per bulan')}</td>
     <td>${stBadge(s.status)}</td>
     <td>${canPay() ? bayarBadge(e) : '<span class="muted">—</span>'}</td>
     <td class="nowrap"><button class="icon-btn" title="Kirim akses portal ortu" onclick="waAkses('${s.id}')">${ic('key')}</button><button class="icon-btn" title="Edit" onclick="formSiswa('${s.id}')">${ic('edit')}</button><button class="icon-btn" title="Hapus" onclick="delSiswa('${s.id}')">${ic('trash')}</button></td>
@@ -1564,6 +1635,8 @@ function formSiswa(id) {
     <div class="field"><label>Tanggal lahir</label><input class="input" type="date" name="tglLahir" value="${esc(s.tglLahir || '')}"></div>
     <div class="field full"><label>Paket belajar *</label><select class="input" name="paketId" required><option value="">— pilih paket —</option>${paketPilihan().map(p => `<option value="${p.id}" ${p.id === s.paketId ? 'selected' : ''}>${esc(p.nama)}${+p.harga ? ' · ' + rp(p.harga) : ''}</option>`).join('')}</select></div>
     <div class="field"><label>Home visit / luar bimbel?</label><select class="input" name="homeVisit">${optList([['Tidak', 'Tidak'], ['Ya', 'Ya — kena uang transport']], s.homeVisit)}</select><span class="hint">${tp ? `Transport ${rp(tp.harga)}/pertemuan` : ''}</span></div>
+    <div class="field"><label>Cara bayar</label><select class="input" name="caraBayar">${optList(CARA_BAYAR, s.caraBayar || '')}</select><span class="hint">Home visit bisa per bulan atau per pertemuan</span></div>
+    <div class="field"><label>Kelompok home visit (opsional)</label><input class="input" name="kelompok" list="dlKel" placeholder="mis. HV Bu Rina Patebon" value="${esc(s.kelompok || '')}"><datalist id="dlKel">${[...new Set(D('Siswa').map(x => x.kelompok).filter(Boolean))].sort().map(k => `<option value="${esc(k)}">`).join('')}</datalist><span class="hint">${s.kelompok ? 'Anggota: ' + esc(D('Siswa').filter(x => x.kelompok === s.kelompok).map(x => x.panggilan || x.nama).join(', ')) : 'Nama sama = satu kelompok (2–4 anak)'}</span></div>
     <div class="field"><label>Harga khusus (opsional)</label><input class="input" name="sppNominal" inputmode="numeric" placeholder="kosong = harga paket" value="${esc(s.sppNominal || '')}"><span class="hint" id="sppPrev"></span></div>
     <div class="field"><label>Transport khusus / pertemuan (opsional)</label><input class="input" name="transportKhusus" inputmode="numeric" placeholder="kosong = tarif transport" value="${esc(s.transportKhusus || '')}"><span class="hint">Hanya untuk home visit / privat rumah. Isi 0 bila tanpa transport.</span></div>
     <div class="field"><label>Nama orang tua/wali</label><input class="input" name="ortu" value="${esc(s.ortu || '')}"></div>
@@ -1577,6 +1650,7 @@ function formSiswa(id) {
     <div class="field"><label>Status</label><select class="input" name="status">${optList(['Baru', 'Aktif', 'Cuti', 'Berhenti'], s.status)}</select></div>
     <div class="field"><label>Kode akses orang tua</label><input class="input" name="kodeOrtu" required inputmode="numeric" value="${esc(s.kodeOrtu || '')}"></div>
     <div class="field full"><label>Catatan khusus</label><textarea class="input" name="catatan" style="min-height:60px">${esc(s.catatan || '')}</textarea></div>
+    ${id ? '' : `<div class="field full"><label>Anak lain sekaligus (kakak/adik / anggota kelompok home visit) — 1 nama per baris</label><textarea class="input" name="anakLain" style="min-height:70px" placeholder="Nama anak ke-2&#10;Nama anak ke-3"></textarea><span class="hint">Dibuat dengan paket, orang tua, WA, alamat, kelompok & <b>kode akses yang sama</b> → cukup 1 akun ortu. Jenjang/kelas bisa diedit sesudahnya.</span></div>`}
   </form>`, `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="$('#fSiswa').requestSubmit()">Simpan</button>`, true);
   sppPreview();
 }
@@ -1586,8 +1660,13 @@ function sppPreview() {
   if (el) el.textContent = pk ? `Harga paket: ${rp(pk.harga)}/${isPerJam(pk) ? 'jam (isi harga khusus per jam)' : 'bulan (isi harga khusus per bulan)'}` : 'Pilih paket dulu';
 }
 async function saveSiswa(id) {
-  const f = formData($('#fSiswa')); f.sppNominal = digits(f.sppNominal); f.transportKhusus = digits(f.transportKhusus);
-  try { const r = await saveRow('Siswa', Object.assign(id ? { ...siswaById(id) } : {}, f, id ? { id } : {})); closeModal(); toast(`Data ${r.nama} tersimpan (${r.id})`); renderAdmin(); }
+  const f = formData($('#fSiswa')); f.sppNominal = digits(f.sppNominal); if (!id && !f.tglDaftar) f.tglDaftar = todayStr(); f.transportKhusus = digits(f.transportKhusus);
+  const lain = String(f.anakLain || '').split('\n').map(x => x.trim()).filter(Boolean).slice(0, 5); delete f.anakLain;
+  try {
+    const r = await saveRow('Siswa', id ? Object.assign({}, f, { id }) : f);
+    if (lain.length) await saveRows('Siswa', lain.map(nama => Object.assign({}, f, { id: '', nama, panggilan: '', kodeOrtu: r.kodeOrtu || f.kodeOrtu })));
+    S._famV = (S._famV || 0) + 1; closeModal(); toast(`Data ${r.nama} tersimpan (${r.id})${lain.length ? ` + ${lain.length} anak lain` : ''}`); renderAdmin();
+  }
   catch (e) { toast(e.message, true); }
 }
 function delSiswa(id) {
@@ -1597,6 +1676,7 @@ function delSiswa(id) {
 /* ---- aktivasi pendaftar → siswa aktif (+ biaya pendaftaran & buku) ---- */
 function formAktivasi(id) {
   const s = siswaById(id), st = S.settings, tp = transportPaket();
+  const sib = keluargaOf(s).filter(x => x.id !== s.id && x.status !== 'Baru');
   const guess = paketPilihan().find(p => /home/i.test(s.paketDiminta || '') ? /home/i.test(p.nama) : /privat/i.test(s.paketDiminta || '') ? /privat/i.test(p.nama) : /klasikal/i.test(p.nama));
   modal(`Aktivasi murid — ${esc(s.nama)}`, `<form id="fAkt" class="form-grid" onsubmit="event.preventDefault();saveAktivasi('${id}')">
     <div class="full info-box small">Dari formulir: paket <b>${esc(s.paketDiminta || '-')}</b> · tempat <b>${esc(s.tempatLes || '-')}</b> · jadwal <b>${esc(s.jadwalDiminta || '-')}</b></div>
@@ -1608,7 +1688,9 @@ function formAktivasi(id) {
     <div class="field"><label>Home visit?</label><select class="input" name="homeVisit">${optList([['Tidak', 'Tidak'], ['Ya', 'Ya — kena uang transport']], s.homeVisit)}</select><span class="hint">${tp && tp.harga ? 'Transport ' + rp(tp.harga) + '/pertemuan' : ''}</span></div>
     <div class="field"><label>Tempat les</label><select class="input" name="tempatLes"><option value="">—</option>${optList([...new Set(listOf('lokasiList').concat(s.tempatLes ? [s.tempatLes] : []))], s.tempatLes)}</select></div>
     <div class="field"><label>Tanggal mulai les</label><input class="input" type="date" name="tglMulai" value="${todayStr()}"></div>
-    <div class="field"><label>Kode akses orang tua</label><input class="input" name="kodeOrtu" value="${esc(s.kodeOrtu || rand4())}"></div>
+    <div class="field"><label>Kode akses orang tua</label><input class="input" name="kodeOrtu" value="${esc(sib[0] ? sib[0].kodeOrtu : s.kodeOrtu || rand4())}">${sib.length ? `<span class="hint">👨‍👩‍👧 Sudah ada ${esc(sib.map(x => x.nama).join(', '))} dengan WA ortu sama → kode disamakan, cukup 1 akun ortu.</span>` : ''}</div>
+    <div class="field"><label>Cara bayar</label><select class="input" name="caraBayar">${optList(CARA_BAYAR, s.caraBayar || '')}</select></div>
+    <div class="field"><label>Kelompok home visit (opsional)</label><input class="input" name="kelompok" list="dlKel2" value="${esc(s.kelompok || '')}" placeholder="mis. HV Bu Rina"><datalist id="dlKel2">${[...new Set(D('Siswa').map(x => x.kelompok).filter(Boolean))].sort().map(k => `<option value="${esc(k)}">`).join('')}</datalist></div>
     <div class="field"><label>WA orang tua</label><input class="input" name="waOrtu" value="${esc(s.waOrtu || '')}"></div>
     <div class="field"><label>WA siswa</label><input class="input" name="waSiswa" value="${esc(s.waSiswa || '')}"></div>
     <div class="field full"><label>Alamat rumah</label><input class="input" name="alamat" value="${esc(s.alamat || '')}"></div>
@@ -1645,10 +1727,24 @@ function csvLogin(t) {
   if (t === 'guru') downloadFile(`Login-Guru-${todayStr()}.csv`, toCSV([['ID Guru', 'PIN', 'Nama', 'Jenjang', 'WhatsApp', 'Status']].concat(D('Guru').map(g => [g.id, g.pin, g.nama, levelOf(g), g.wa, g.status]))));
   else downloadFile(`Login-Ortu-${todayStr()}.csv`, toCSV([['ID Siswa', 'Kode Akses', 'Nama', 'Orang tua', 'WA ortu', 'Status']].concat(D('Siswa').map(s => [s.id, s.kodeOrtu, s.nama, s.ortu, s.waOrtu, s.status]))));
 }
+/* keluarga = siswa dengan No. WA ortu sama → 1 akun ortu (kakak/adik, atau 1 anak dengan 2 paket) */
+const waKey = w => { let d = String(w || '').replace(/\D/g, ''); if (d.startsWith('62')) d = '0' + d.slice(2); return d.length >= 9 ? d : ''; };
+function keluargaOf(s) {
+  const k = waKey(s && s.waOrtu); if (!k) return [s];
+  const arr = D('Siswa'), c = S._fam; let m;
+  if (c && c.arr === arr && c.n === arr.length && c.v === S._famV) m = c.m; else { m = {}; arr.forEach(x => { const w = waKey(x.waOrtu); if (w && x.status !== 'Berhenti' && x.status !== 'Baru') (m[w] = m[w] || []).push(x); }); S._fam = { arr, n: arr.length, m, v: S._famV }; }
+  const l = m[k] || []; return l.some(x => x.id === s.id) ? l : [s].concat(l);
+}
+function famBadge(s) {
+  const f = keluargaOf(s); if (f.length < 2) return '';
+  const lain = f.filter(x => x.id !== s.id), sama = lain.filter(x => pickNorm(x.nama) === pickNorm(s.nama));
+  return `<div class="small" style="margin-top:2px" title="Satu akun ortu (No. WA ortu sama): ${esc(f.map(x => x.nama + ' ' + x.id).join(', '))}"><span class="badge b-blue">👨‍👩‍👧 1 akun ortu</span> ${sama.length ? `<span class="muted">paket lain: ${sama.map(x => esc(x.id)).join(', ')}</span>` : `<span class="muted">+ ${lain.map(x => esc(x.panggilan || x.nama.split(' ')[0])).join(', ')}</span>`}</div>`;
+}
 function waAkses(id) {
-  const s = siswaById(id), st = S.settings;
+  const s = siswaById(id), st = S.settings, fam = keluargaOf(s);
   const link = portalLink('');
-  openWa(s.waOrtu, `Assalamu'alaikum Bapak/Ibu ${s.ortu || ''},\n\nBerikut akses *Portal Orang Tua ${st.namaLembaga}* untuk ananda ${s.nama}:\n${link ? '\nLink: ' + link + '\n' : ''}\nID Siswa: *${s.id}*\nKode Akses: *${s.kodeOrtu}*\n\nDi portal ini Bapak/Ibu bisa melihat kehadiran, perkembangan belajar, raport bulanan, tagihan & kuitansi pembayaran les.\n\nTerima kasih 🙏`);
+  const lain = fam.filter(x => x.id !== s.id);
+  openWa(s.waOrtu, `Assalamu'alaikum Bapak/Ibu ${s.ortu || ''},\n\nBerikut akses *Portal Orang Tua ${st.namaLembaga}* untuk ananda ${s.nama}:\n${link ? '\nLink: ' + link + '\n' : ''}\nID Siswa: *${s.id}*\nKode Akses: *${s.kodeOrtu}*\n${lain.length ? `\nCukup *1 akun* ini: data ${fam.map(x => (x.panggilan || x.nama) + (paketNama(x) ? ' (' + paketNama(x) + ')' : '')).join(', ')} bisa dilihat semua — pilih nama anak di bagian atas portal.\n` : ''}\nDi portal ini Bapak/Ibu bisa melihat kehadiran, perkembangan belajar, raport bulanan, tagihan & kuitansi pembayaran les.\n\nTerima kasih 🙏`);
 }
 
 /* ================= PAKET & FEE GURU ================= */
@@ -1664,7 +1760,7 @@ function paketTab() {
     <td><input class="input" name="nama" style="min-width:210px" value="${esc(p.nama)}"></td>
     <td><select class="input" name="kategori" style="width:auto">${optList(KATEGORI, p.kategori)}</select></td>
     <td><input class="input" name="harga" inputmode="numeric" style="width:105px" value="${esc(p.harga || '')}" placeholder="0"></td>
-    <td><select class="input" name="satuan" style="width:auto">${optList([['Per bulan', 'per bulan (klasikal)'], ['Per jam', 'per jam (privat/HV)'], ['Per pertemuan', 'per pertemuan (transport)']], p.satuan || 'Per bulan')}</select></td>
+    <td><select class="input" name="satuan" style="width:auto">${optList([['Per bulan', 'per bulan (klasikal)'], ['Per jam', 'per jam (privat/HV)'], ['Per pertemuan', 'per pertemuan (HV / transport)']], p.satuan || 'Per bulan')}</select></td>
     <td><select class="input" name="waktuBayar" style="width:auto">${optList([['Awal', 'Awal bulan'], ['Akhir', 'Akhir bulan']], p.waktuBayar || 'Awal')}</select></td>
     <td><select class="input" name="aktif" style="width:auto">${optList(['Ya', 'Tidak'], p.aktif || 'Ya')}</select></td>
     <td class="c num">${D('Siswa').filter(s => s.paketId === p.id && s.status === 'Aktif').length}</td>
@@ -1692,7 +1788,7 @@ function delPaket(id) {
 function feeTentorTab() {
   const L = levels();
   return `<div class="card"><div class="card-head"><div><h3>Fee tentor ${esc(S.settings.tahunAjaran || '')}</h3><p class="small muted">Honor per sesi tentor. <b>Fee</b> = untuk 1 sesi sesuai durasinya (baris 1 jam dikalikan durasi sesi, mis. 1,5 jam × fee). Jumlah anak = anak yang <b>hadir</b> di sesi itu. Kolom jenjang tentor kosong = pakai fee dasar. Fee khusus per tentor diatur di tab sebelah.</p></div><div class="spacer"></div><button class="btn ghost" onclick="addFeeRow()">${ic('plus')} Tambah baris</button></div>
-  <form id="fFeeT" onsubmit="event.preventDefault();saveFeeRows()"><div class="table-wrap"><table class="t"><thead><tr><th>#</th><th>Jenis belajar</th><th>Jumlah anak</th><th>Jenjang siswa</th><th>Durasi (jam)</th><th>Fee dasar</th>${L.slice(1).map(l => `<th style="white-space:normal;max-width:100px">Fee ${esc(l)}</th>`).join('')}<th>Transport</th><th></th></tr></thead><tbody>
+  <form id="fFeeT" onsubmit="event.preventDefault();saveFeeRows()"><div class="table-wrap"><table class="t"><thead><tr><th>#</th><th>Jenis belajar</th><th>Jumlah anak</th><th>Jenjang siswa</th><th>Durasi (jam)</th><th>Fee dasar</th>${L.slice(1).map(l => `<th style="white-space:normal;max-width:100px">Fee ${esc(l)}</th>`).join('')}<th style="white-space:normal;max-width:110px">Transport /anak /bulan</th><th></th></tr></thead><tbody>
   ${feeRows().map(r => { const lv = feeLvMap(r); return `<tr data-id="${r.id}">
     <td><input class="input" name="urut" style="width:52px" value="${esc(r.urut || '')}"></td>
     <td><select class="input" name="jenis" style="width:auto">${optList(FEE_JENIS, r.jenis)}</select></td>
@@ -1710,6 +1806,7 @@ function feeTentorTab() {
     • <b>Jumlah anak</b> = siswa yang dicentang hadir: klasikal 1–2 / 3–4 (5 anak atau lebih ikut 3–4), home visit 2 / 3 / 4.<br>
     • <b>Jenjang siswa</b> dari data siswa yang hadir (klasikal: TK & SD atau SMP; home visit campuran → TK & SD / SD & SMP).<br>
     • Ada baris dengan durasi persis sama (mis. home visit 1,5 jam) → fee baris itu. Selain itu fee 1 jam × durasi.<br>
+    • <b>Transport</b> dihitung <b>sekali per bulan untuk tiap anak</b> (privat rumah), bukan per pertemuan — berapa pun jumlah pertemuannya.<br>
     • Baris tidak ketemu → honor Rp0 dan ditandai merah di Gaji Guru.</p></div>`;
 }
 const FEE_STD = [['Klasikal', '1-2', 'TK & SD', 1, 20000, ''], ['Klasikal', '3-4', 'TK & SD', 1, 25000, ''], ['Klasikal', '1-2', 'SMP', 1, 22000, ''], ['Klasikal', '3-4', 'SMP', 1, 25000, ''],
@@ -1757,7 +1854,7 @@ function feeTab() {
 }
 async function saveFee() {
   const changed = [];
-  $$('#fFee tr[data-gid]').forEach(tr => { const g = guruById(tr.dataset.gid), lv = $('[data-lv]', tr).value; if (lv !== levelOf(g) || g.jenjang !== lv) changed.push(Object.assign({}, g, { jenjang: lv })); });
+  $$('#fFee tr[data-gid]').forEach(tr => { const g = guruById(tr.dataset.gid), lv = $('[data-lv]', tr).value; if (lv !== levelOf(g) || g.jenjang !== lv) changed.push({ id: g.id, jenjang: lv }); });
   if (!changed.length) return toast('Tidak ada perubahan');
   try { await saveRows('Guru', changed); toast(`${changed.length} tentor tersimpan ✓`); renderPage(); } catch (e) { toast(e.message, true); }
 }
@@ -1803,7 +1900,7 @@ async function saveJenjang() {
   const ren = {}; old.forEach((o, i) => { if (neu[i] && neu[i] !== o) ren[o] = neu[i]; });
   try {
     const r = await call('saveSettings', { settings: { jenjangTentor: neu.join('\n') } }); S.settings = r.settings;
-    const gs = D('Guru').filter(g => ren[levelOf(g)] || !neu.includes(levelOf(g))).map(g => Object.assign({}, g, { jenjang: ren[levelOf(g)] || neu[Math.min(old.indexOf(levelOf(g)), neu.length - 1)] || neu[0] }));
+    const gs = D('Guru').filter(g => ren[levelOf(g)] || !neu.includes(levelOf(g))).map(g => ({ id: g.id, jenjang: ren[levelOf(g)] || neu[Math.min(old.indexOf(levelOf(g)), neu.length - 1)] || neu[0] }));
     if (gs.length) await saveRows('Guru', gs);
     closeModal(); toast(`Jenjang tersimpan ✓${gs.length ? ` · ${gs.length} tentor diperbarui` : ''}`); renderPage();
   } catch (e) { toast(e.message, true); }
@@ -1814,7 +1911,7 @@ function pgJadwal() {
   const t = S.tab.jd || 'minggu', nTgl = D('Jadwal').filter(j => j.tanggal && j.tanggal >= todayStr()).length;
   const gf = S.f.jdG || '';
   const head = `<div class="row" style="margin-bottom:10px">${tabs('jd', [['minggu', 'Mingguan (tiap hari)'], ['tanggal', `Per tanggal${nTgl ? ' (' + nTgl + ')' : ''}`]], 'minggu')}<div class="spacer"></div>
-    <select class="input" style="max-width:220px" onchange="setF('jdG',this.value)"><option value="">Semua guru</option>${guruAbc().filter(g => D('Jadwal').some(j => j.guruId === g.id)).map(g => `<option value="${g.id}" ${gf === g.id ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select>
+    ${pickFilter('jdG', guruItems(D('Guru').filter(g => D('Jadwal').some(j => j.guruId === g.id))), gf, 'cari guru…', 'Semua guru')}
     <button class="btn" onclick="formJadwal('', ${t === 'tanggal' ? 'true' : 'false'})">${ic('plus')} Tambah Jadwal</button></div>`;
   return head + (t === 'tanggal' ? jadwalTanggal(gf) : jadwalMingguan(gf));
 }
@@ -1855,9 +1952,10 @@ function formJadwal(id, dated) {
     <div class="field"><label>Tipe kelas</label><select class="input" name="tipe">${optList([...new Set(tipeKelasList().concat(j.tipe ? [j.tipe] : []))], j.tipe)}</select></div>
     <div class="field"><label>Jam mulai</label><input class="input" type="time" name="jamMulai" value="${esc(j.jamMulai)}"></div>
     <div class="field"><label>Jam selesai</label><input class="input" type="time" name="jamSelesai" value="${esc(j.jamSelesai)}"></div>
-    <div class="field"><label>Guru/tentor (ketik untuk cari)</label><input class="input" name="guruPick" list="dlGuru" autocomplete="off" placeholder="ketik nama guru…" value="${gj ? esc(gj.nama + ' (' + gj.id + ')') : ''}" onfocus="this.select()"><datalist id="dlGuru">${guruAbc().filter(g => g.status !== 'Nonaktif' || g.id === j.guruId).map(g => `<option value="${esc(g.nama)} (${g.id})">`).join('')}</datalist></div>
-    <div class="field"><label>Lokasi</label><select class="input" name="lokasi"><option value="">—</option>${optList([...new Set(listOf('lokasiList').concat(j.lokasi ? [j.lokasi] : []))], j.lokasi)}</select></div>
+    <div class="field"><label>Guru/tentor (ketik untuk cari)</label>${pickBox('guruId', guruItems(D('Guru').filter(g => g.status !== 'Nonaktif' || g.id === j.guruId)), j.guruId || '', 'ketik nama guru…')}</div>
+    <div class="field"><label>Lokasi (ketik untuk cari)</label>${pickBox('lokasi', [...new Set(listOf('lokasiList').concat(j.lokasi ? [j.lokasi] : []))].map(l => [l, l, '', '', 'var(--matcha-50, #eef6e8)']), j.lokasi || '', 'ketik lokasi…')}</div>
     <div class="field"><label>Mapel / materi (opsional)</label><input class="input" name="mapel" list="dlMapel" value="${esc(j.mapel || '')}" placeholder="mis. Matematika"><datalist id="dlMapel">${(typeof mapelList === 'function' ? mapelList() : []).map(m => `<option value="${esc(m)}">`).join('')}</datalist></div>
+    ${(() => { const ks = [...new Set(D('Siswa').filter(x => x.status === 'Aktif' && x.kelompok).map(x => x.kelompok))].sort(); return ks.length ? `<div class="field full"><label>Pilih kelompok home visit (centang semua anggotanya)</label><div class="chips">${ks.map(k => `<button type="button" class="chip" onclick="const ids=${esc(JSON.stringify(D('Siswa').filter(x => x.kelompok === k).map(x => x.id)))};$$('#fJadwal input[name=sw]').forEach(c=>{if(ids.includes(c.value))c.checked=true})">${esc(k)} (${D('Siswa').filter(x => x.kelompok === k && x.status === 'Aktif').length})</button>`).join('')}</div></div>` : ''; })()}
     <div class="field full"><label>Daftar siswa <input class="input" style="display:inline-block;width:180px;padding:4px 9px;margin-left:8px" placeholder="cari…" oninput="$$('#swPick label').forEach(l=>l.style.display=l.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')"></label><div id="swPick" style="max-height:240px;overflow:auto;border:2px solid var(--line);border-radius:12px;padding:8px 12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:4px;background:#fff">
       ${siswaAktif().map(s => `<label class="row" style="gap:8px;font-weight:600;cursor:pointer;flex-wrap:nowrap"><input type="checkbox" name="sw" value="${s.id}" ${sel.includes(s.id) ? 'checked' : ''}> <span>${esc(s.nama)} <span class="small muted">${esc(kelasLabel(s))}</span></span></label>`).join('') || '<span class="muted">Belum ada siswa aktif</span>'}
     </div></div>
@@ -1871,9 +1969,7 @@ function jdDatesRender() { const el = $('#jdDates'); if (el) el.innerHTML = S._j
 async function saveJadwal(id) {
   const f = formData($('#fJadwal')); delete f.sw;
   f.siswaIds = $$('#fJadwal input[name=sw]:checked').map(x => x.value).join(',');
-  const m = String(f.guruPick || '').match(/\(([A-Z]+\d+)\)\s*$/), gg = m ? D('Guru').find(g => g.id === m[1]) : D('Guru').find(g => g.nama.toLowerCase() === String(f.guruPick || '').trim().toLowerCase());
-  if (!gg) return toast('Pilih guru dari daftar (ketik lalu klik namanya)', true);
-  f.guruId = gg.id; delete f.guruPick;
+  if (!f.guruId || !D('Guru').some(g => g.id === f.guruId)) return toast('Pilih guru dari daftar (ketik lalu klik namanya)', true);
   if (f.jamSelesai && f.jamMulai && f.jamSelesai <= f.jamMulai) return toast('Jam selesai harus setelah jam mulai', true);
   try {
     if (S._jdTgl) {
@@ -1885,7 +1981,7 @@ async function saveJadwal(id) {
     closeModal(); renderPage();
   } catch (e) { toast(e.message, true); }
 }
-function dupJadwal(id) { const j = D('Jadwal').find(x => x.id === id); closeModal(); formJadwal('', true); setTimeout(() => { const f = $('#fJadwal'); ['tipe', 'jamMulai', 'jamSelesai', 'lokasi', 'mapel', 'catatan'].forEach(k => { if (f[k]) f[k].value = j[k] || ''; }); f.guruPick.value = `${guruById(j.guruId).nama} (${j.guruId})`; const ids = (j.siswaIds || '').split(','); $$('#fJadwal input[name=sw]').forEach(c => c.checked = ids.includes(c.value)); }, 30); }
+function dupJadwal(id) { const j = D('Jadwal').find(x => x.id === id); closeModal(); formJadwal('', true); setTimeout(() => { const f = $('#fJadwal'); ['tipe', 'jamMulai', 'jamSelesai', 'mapel', 'catatan'].forEach(k => { if (f[k]) f[k].value = j[k] || ''; }); pickSet(f, 'guruId', j.guruId); pickSet(f, 'lokasi', j.lokasi || ''); const ids = (j.siswaIds || '').split(','); $$('#fJadwal input[name=sw]').forEach(c => c.checked = ids.includes(c.value)); }, 30); }
 function delJadwal(id) { confirmBox('Hapus jadwal ini?', async () => { await removeRow('Jadwal', id); toast('Jadwal dihapus'); renderPage(); }); }
 
 /* ================= SESI & KEHADIRAN ================= */
@@ -1906,7 +2002,7 @@ function sesiList() {
     <div class="chips"><button class="chip ${today ? 'on' : ''}" onclick="setF('ssDay','1')">Hari ini</button><button class="chip ${!today ? 'on' : ''}" onclick="setF('ssDay','')">Per bulan</button></div>
     ${today ? '' : `<select class="input" style="max-width:190px" onchange="setF('ssP',this.value)">${monthOptions(p)}</select>`}
     <input class="input" style="max-width:200px" placeholder="Cari guru / siswa…" value="${esc(S.f.ssQ || '')}" onchange="setF('ssQ',this.value)">
-    <select class="input" style="max-width:220px" onchange="setF('ssG',this.value)"><option value="">Semua guru</option>${guruAbc().filter(g => g.status !== 'Nonaktif').map(g => `<option value="${g.id}" ${gid === g.id ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select>
+    ${pickFilter('ssG', guruItems(D('Guru').filter(g => g.status !== 'Nonaktif' || g.id === gid)), gid, 'cari guru…', 'Semua guru')}
     <div class="spacer"></div><button class="btn ghost" onclick="csvSesi('${p}')">${ic('download')} CSV</button><button class="btn" onclick="formSesi()">${ic('plus')} Tambah Sesi</button></div>
   <p class="small muted" style="margin-bottom:8px">Sesi diisi guru lewat Portal Guru: tanggal, jam, dan centang siswa yang hadir. Siswa yang hadir menjadi dasar honor guru & kehadiran di raport.</p>
   <div class="table-wrap"><table class="t"><thead><tr><th>Tanggal</th><th>Jam</th><th>Guru</th><th>Siswa hadir</th><th class="c">Jumlah</th><th></th></tr></thead><tbody>
@@ -2009,8 +2105,8 @@ function pgHarian() {
   const rows = D('Perkembangan').filter(x => x.tanggal.startsWith(p) && (!sid || x.siswaId === sid) && (!gid || x.guruId === gid)).sort((a, b) => b.tanggal.localeCompare(a.tanggal));
   return `<div class="card"><div class="card-head">
     <select class="input" style="max-width:180px" onchange="setF('phP',this.value)">${monthOptions(p)}</select>
-    <select class="input" style="max-width:220px" onchange="setF('phS',this.value)"><option value="">Semua siswa</option>${siswaAktif().map(s => `<option value="${s.id}" ${sid === s.id ? 'selected' : ''}>${esc(s.nama)}</option>`).join('')}</select>
-    <select class="input" style="max-width:200px" onchange="setF('phG',this.value)"><option value="">Semua guru</option>${guruAbc().map(g => `<option value="${g.id}" ${gid === g.id ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select>
+    ${pickFilter('phS', siswaItems(D('Siswa').filter(s => s.status === 'Aktif' || s.id === sid)), sid, 'cari siswa…', 'Semua siswa')}
+    ${pickFilter('phG', guruItems(), gid, 'cari guru…', 'Semua guru')}
     <div class="spacer"></div><button class="btn" onclick="formHarian()">${ic('plus')} Tambah Catatan</button></div>
     <p class="small muted" style="margin-bottom:8px">Catatan ditulis guru lewat Portal Guru, tampil di Portal Orang Tua, dan jadi bahan raport bulanan.</p>
     ${rows.map(x => `<div class="li" style="align-items:flex-start"><div class="avatar" style="background:var(--purple-50)">${initials(siswaById(x.siswaId).nama)}</div><div class="meta"><b>${esc(siswaById(x.siswaId).nama)} ${x.materi ? `<span class="badge b-purple">${esc(x.materi)}</span>` : ''}</b><div style="white-space:pre-line">${esc(x.deskripsi)}</div><span class="small muted">${dayName(x.tanggal)}, ${fmtDate(x.tanggal)} · ${esc(guruById(x.guruId).nama)}</span></div><button class="icon-btn" onclick="formHarian('${x.id}')">${ic('edit')}</button><button class="icon-btn" onclick="delHarian('${x.id}')">${ic('trash')}</button></div>`).join('') || '<div class="empty">Belum ada catatan perkembangan di bulan ini</div>'}
@@ -2127,7 +2223,7 @@ function formRaport(sid, p) {
     <div class="field"><label>Dari total pertemuan <span class="muted">(opsional)</span></label><input class="input" name="pertemuan" inputmode="numeric" value="${esc(a.pertemuan || '')}"></div>
     <div class="field full"><label>A. Hasil dan Pencapaian</label><textarea class="input" name="hasil" style="min-height:110px">${esc(a.hasil || '')}</textarea></div>
     <div class="field full"><label>B. Arahan pembelajaran</label><textarea class="input" name="arahan" style="min-height:90px">${esc(a.arahan || '')}</textarea></div>
-    <div class="field"><label>Guru penulis</label><select class="input" name="guruId">${guruAbc().map(g => `<option value="${g.id}" ${g.id === (a.guruId || (D('Jadwal').find(j => j.siswaIds.includes(sid)) || {}).guruId) ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select></div>
+    <div class="field"><label>Guru penulis</label>${pickBox('guruId', guruItems(), a.guruId || (D('Jadwal').find(j => String(j.siswaIds || '').includes(sid)) || {}).guruId || '', 'ketik nama guru…')}</div>
     <div class="field"><label>Tanggal tanda tangan</label><input class="input" type="date" name="tanggal" value="${esc(a.tanggal || todayStr())}"></div>
     <div class="field full"><label>Status</label><select class="input" name="status">${optList([['Terbit', 'Terbit — tampil di Portal Orang Tua'], ['Draft', 'Draft — belum tampil']], a.status || 'Terbit')}</select></div>
     ${harianRef(sid, p, D('Perkembangan'), x => guruById(x.guruId).nama)}
@@ -2167,7 +2263,8 @@ function sppTagihan() {
   const all = siswaTagih().map(s => ({ s, e: billOf(s, p) })).filter(r => r.e.billed || r.e.paid);
   const unpaid = all.filter(r => isArrear(r.e)), lunas = all.filter(r => r.e.status === 'lunas');
   const akhirNanti = p === thisPeriod() && new Date().getDate() < (+st.tagihAkhirMulai || 25) ? siswaAktif().filter(s => waktuOf(s) === 'Akhir').length : 0;
-  let rows = flt === 'belum' ? unpaid : flt === 'lunas' ? lunas : all;
+  const q = S.f.sppQ || '', shown = r => flt === 'belum' ? isArrear(r.e) : flt === 'lunas' ? r.e.status === 'lunas' : true;
+  const rows = all.slice();
   rows.sort((a, b) => (isArrear(b.e) - isArrear(a.e)) || a.s.nama.localeCompare(b.s.nama));
   const tot = sum(all, r => r.e.tag.nominal), masuk = sum(all, r => r.e.paid), sisa = sum(unpaid, r => r.e.sisa);
   return `<div class="grid g3">
@@ -2180,11 +2277,12 @@ function sppTagihan() {
     <div class="card-head">
       <select class="input" style="max-width:190px" onchange="setF('sppP',this.value)">${monthOptions(p)}</select>
       <div class="chips">${[['belum', `Belum / kurang (${unpaid.length})`], ['lunas', `Lunas (${lunas.length})`], ['semua', 'Semua']].map(([k, l]) => `<button class="chip ${flt === k ? 'on' : ''}" onclick="setF('sppFilter','${k}')">${l}</button>`).join('')}</div>
+      <input class="input" style="max-width:250px" placeholder="🔍 Cari siswa / ortu / ID…" value="${esc(q)}" oninput="S.f.sppQ=this.value;liveFilter(this,'#tgBody')"><span class="small muted" id="tgBodyN"></span>
       <div class="spacer"></div>
       ${unpaid.length ? `<button class="btn wa" onclick="massReminder('${p}')">${ic('wa')} Kirim Pengingat (${unpaid.length})</button>` : ''}
     </div>
-    <div class="table-wrap"><table class="t"><thead><tr><th>Siswa</th><th>Orang tua</th><th class="r">Tagihan</th><th class="r">Dibayar</th><th>Jatuh tempo</th><th>Status</th><th></th></tr></thead><tbody>
-    ${rows.map(({ s, e }) => `<tr class="${isArrear(e) ? 'unpaid' : ''}">
+    <div class="table-wrap"><table class="t"><thead><tr><th>Siswa</th><th>Orang tua</th><th class="r">Tagihan</th><th class="r">Dibayar</th><th>Jatuh tempo</th><th>Status</th><th></th></tr></thead><tbody id="tgBody">
+    ${rows.map(r => ({ ...r, h: !shown(r) })).map(({ s, e, h }) => `<tr class="${isArrear(e) ? 'unpaid' : ''}"${lfAttr([s.nama, s.ortu, s.id, s.waOrtu, paketNama(s)].join(' '), h, q)}>
       <td><b>${esc(s.nama)}</b><div class="small muted">${esc(s.id)} · ${esc(paketNama(s) || 'paket belum diisi')}</div></td>
       <td>${esc(s.ortu || '-')}<div class="small muted">${esc(s.waOrtu || '')}</div></td>
       <td class="r num"><b>${rp(e.tag.nominal)}</b><div class="small muted">${tagihanRincian(e)}${e.carryIn ? ` · deposit ${rp(e.carryIn)}` : ''}</div></td>
@@ -2192,7 +2290,7 @@ function sppTagihan() {
       <td class="small nowrap">${fmtDate(dueDateOf(e.waktu, p, st))}<div class="muted">${e.waktu === 'Akhir' ? 'akhir bulan' : 'awal bulan'}</div></td>
       <td>${bayarBadge(e)}${e.status === 'lunas' && e.carryOut ? `<div class="small" style="color:var(--blue)">deposit ${rp(e.carryOut)}</div>` : ''}</td>
       <td class="nowrap r">${e.status !== 'lunas' ? `<button class="btn sm" onclick="formBayar('${s.id}','${p}')">Catat Bayar</button> ` : ''}<button class="btn sm ghost" onclick="showDoc('${s.id}','${p}')">${ic('file')} ${e.rows.length ? 'Kuitansi' : 'Tagihan'}</button><button class="icon-btn" title="Kirim WA" onclick="showDoc('${s.id}','${p}')">${ic('wa')}</button></td>
-    </tr>`).join('') || `<tr><td colspan="7"><div class="empty">${flt === 'belum' ? '🎉 Semua tagihan sudah dibayar' : 'Tidak ada data'}</div></td></tr>`}
+    </tr>`).join('')}${!rows.some(shown) && !q ? `<tr><td colspan="7"><div class="empty">${flt === 'belum' ? '🎉 Semua tagihan sudah dibayar' : 'Tidak ada data'}</div></td></tr>` : ''}
     </tbody></table></div>
   </div>`;
 }
@@ -2202,7 +2300,7 @@ function showDoc(sid, p, which) {
   const x = which ? e.rows.find(r => r.id === which) : e.rows[e.rows.length - 1];
   const other = e.rows.length > 1 ? `<div class="row small" style="margin-bottom:8px;gap:6px">Kuitansi bulan ini: ${e.rows.map(r => `<button class="chip ${r === x ? 'on' : ''}" onclick="showDoc('${sid}','${p}','${r.id}')">${esc(r.noKuitansi)} · ${rp(r.nominal)}</button>`).join('')}${isArrear(e) ? `<button class="chip" onclick="showTagihan('${sid}','${p}')">Tagihan sisa</button>` : ''}</div>` : '';
   if (x && (which || !isArrear(e))) {
-    modal('Kuitansi Pembayaran', other + kuitansiHtml(s, x, st), `<button class="btn ghost" onclick="printModal('.kw','Kuitansi ${esc(s.nama)} ${fmtPeriod(p)}')">${ic('print')} Cetak / PDF</button><button class="btn ghost" title="Kirim teks saja" onclick="waKuitansi('${x.id}')">${ic('wa')} Teks</button>${imgBtn(s.waOrtu, kwCaption(s, x))}${canPay() ? `<button class="icon-btn" title="Hapus pembayaran ini" onclick="delBayar('${x.id}')">${ic('trash')}</button>` : ''}`, true);
+    modal('Kuitansi Pembayaran', other + kuitansiHtml(s, x, st), `<button class="btn ghost" onclick="printModal('.kw','Kuitansi ${esc(s.nama)} ${fmtPeriod(p)}')">${ic('print')} Cetak / PDF</button><button class="btn ghost" title="Kirim teks saja" onclick="waKuitansi('${x.id}')">${ic('wa')} Teks</button>${imgBtn(s.waOrtu, kwCaption(s, x))}${canPay() ? `<button class="icon-btn" title="Edit pembayaran (salah tulis)" onclick="formEditBayar('${x.id}')">${ic('edit')}</button><button class="icon-btn" title="Hapus pembayaran ini" onclick="delBayar('${x.id}')">${ic('trash')}</button>` : ''}`, true);
     return prepDocImage('.kw', 'Kuitansi ' + s.nama + ' ' + x.noKuitansi);
   }
   showTagihan(sid, p, other);
@@ -2220,7 +2318,7 @@ function waKuitansi(id) {
 function waTagihan(sid, p) {
   const s = siswaById(sid), e = billOf(s, p), st = S.settings;
   if (!isArrear(e) && e.rows.length) return waKuitansi(e.rows[e.rows.length - 1].id);
-  openWa(s.waOrtu, `Assalamu'alaikum Bapak/Ibu ${s.ortu || ''},\n\nKami informasikan tagihan les *${st.namaLembaga}*:\n\nNama siswa: ${s.nama}\nPaket: ${paketNama(s) || '-'}\nBulan: ${fmtPeriod(p)}${e.t.perJam ? `\nPertemuan: ${e.tag.sesi}× (${fmtJam(e.tag.jam)} jam × ${rp(e.t.tarif)})` : ''}${e.tag.transport ? `\nTransport: ${e.tag.sesi} × ${rp(e.t.transport)}` : ''}\nTotal: ${rp(e.tag.nominal)}${e.carryIn ? `\nDeposit: −${rp(Math.min(e.carryIn, e.tag.nominal))}` : ''}${e.paid ? `\nSudah dibayar: −${rp(e.paid)}` : ''}\n*Sisa tagihan: ${rp(e.sisa)}*\nJatuh tempo: ${fmtDateLong(dueDateOf(e.waktu, p, st))}\n\n${caraBayarText(st)}\n\nMohon kirim bukti pembayaran ke WA admin ${waAdminOf(st)}. Terima kasih 🙏`);
+  openWa(s.waOrtu, `Assalamu'alaikum Bapak/Ibu ${s.ortu || ''},\n\nKami informasikan tagihan les *${st.namaLembaga}*:\n\nNama siswa: ${s.nama}\nPaket: ${paketNama(s) || '-'}\nBulan: ${fmtPeriod(p)}${e.t.mode === 'ptm' ? `\nPertemuan: ${e.tag.sesi}× ${rp(e.t.tarif)}` : e.t.perJam ? `\nPertemuan: ${e.tag.sesi}× (${fmtJam(e.tag.jam)} jam × ${rp(e.t.tarif)})` : ''}${e.tag.transport ? `\nTransport: ${e.tag.sesi} × ${rp(e.t.transport)}` : ''}\nTotal: ${rp(e.tag.nominal)}${e.carryIn ? `\nDeposit: −${rp(Math.min(e.carryIn, e.tag.nominal))}` : ''}${e.paid ? `\nSudah dibayar: −${rp(e.paid)}` : ''}\n*Sisa tagihan: ${rp(e.sisa)}*\nJatuh tempo: ${fmtDateLong(dueDateOf(e.waktu, p, st))}\n\n${caraBayarText(st)}\n\nMohon kirim bukti pembayaran ke WA admin ${waAdminOf(st)}. Terima kasih 🙏`);
 }
 function massReminder(p) {
   const list = unpaidFor(p);
@@ -2235,13 +2333,19 @@ function bayarInfo() {
   el.innerHTML = `<div class="info-box small">Tagihan ${fmtPeriod(f.periode.value)}: <b>${rp(e.tag.nominal)}</b>${e.tag.sesi ? ` (${tagihanRincian(e)})` : ''}${e.carryIn ? ` · deposit −${rp(e.carryIn)}` : ''}${e.paid ? ` · sudah dibayar ${rp(e.paid)}` : ''} → <b>sisa ${rp(e.sisa)}</b>${lg.saldo ? `<br>Saldo deposit siswa: ${rp(lg.saldo)}` : ''}</div>`;
   return e;
 }
+/* nominal hanya diisi otomatis saat siswa/bulan diganti dan belum diketik manual */
+function bayarChange(ev) {
+  const f = $('#fBayar'), n = ev.target.name; if (!f || !['siswaId', 'periode'].includes(n)) return;
+  const e = bayarInfo(), inp = f.nominal; if (!e) return;
+  if (!inp.value || inp.value === inp.dataset.auto) { inp.value = e.sisa || ''; inp.dataset.auto = inp.value; }
+}
 function formBayar(sid, p) {
   p = p || S.f.sppP || thisPeriod();
   const s = sid ? siswaById(sid) : null, e = s ? billOf(s, p) : null;
-  modal('Catat Pembayaran', `<form id="fBayar" class="form-grid" onsubmit="event.preventDefault();saveBayar()" onchange="if(event.target.name!=='nominal'){const e=bayarInfo();if(e)this.nominal.value=e.sisa||''}">
+  modal('Catat Pembayaran', `<form id="fBayar" class="form-grid" onsubmit="event.preventDefault();saveBayar()" onchange="bayarChange(event)">
     <div class="field full"><label>Siswa (terima dari)</label>${s ? `<input type="hidden" name="siswaId" value="${s.id}"><div class="input ro"><b>${esc(s.nama)}</b> · ${esc(s.id)} · ${esc(paketNama(s))}</div>` : pickBox('siswaId', siswaItems(D('Siswa').filter(x => x.status !== 'Berhenti' && x.status !== 'Baru')), '', 'ketik nama siswa / ID…')}</div>
     <div class="field"><label>Bulan les</label><select class="input" name="periode">${monthOptions(p, 12, 3)}</select></div>
-    <div class="field"><label>Jumlah dibayar (Rp)</label><input class="input" name="nominal" inputmode="numeric" required value="${e ? e.sisa || '' : ''}"></div>
+    <div class="field"><label>Jumlah dibayar (Rp)</label><input class="input" name="nominal" inputmode="numeric" required value="${e ? e.sisa || '' : ''}" data-auto="${e ? e.sisa || '' : ''}"></div>
     <div class="full" id="bayarInfo"></div>
     <div class="field full"><label>Untuk pembayaran (kosong = otomatis)</label><input class="input" name="untuk" placeholder="Les omah sinau bulan …"></div>
     <div class="field"><label>Tanggal bayar</label><input class="input" type="date" name="tanggalBayar" required value="${todayStr()}"></div>
@@ -2303,17 +2407,38 @@ function csvSpp(y) {
 }
 function sppRiwayat() {
   const q = (S.f.rq || '').toLowerCase();
-  const rows = [...D('SPP')].filter(x => x.tanggalBayar && (!q || (siswaById(x.siswaId).nama + x.noKuitansi).toLowerCase().includes(q))).sort((a, b) => (b.tanggalBayar || '').localeCompare(a.tanggalBayar || '') || String(b.noKuitansi).localeCompare(String(a.noKuitansi)));
-  return `<div class="card"><div class="card-head"><input class="input" style="max-width:240px" placeholder="Cari nama / no. kuitansi…" value="${esc(S.f.rq || '')}" onchange="setF('rq',this.value)"><div class="spacer"></div><span class="muted small">${rows.length} transaksi${isOwner() ? ' · ' + rp(sum(rows, x => x.nominal)) : ''}</span><button class="btn ghost" onclick="csvRiwayat()">${ic('download')} CSV</button></div>
-  <div class="table-wrap"><table class="t"><thead><tr><th>Tanggal</th><th>No. Kuitansi</th><th>Terima dari</th><th>Untuk</th><th>Metode</th><th class="r">Jumlah</th><th></th></tr></thead><tbody>
-  ${rows.slice(0, 400).map(x => `<tr><td class="nowrap">${fmtDate(x.tanggalBayar)}</td><td class="small num"><b>${esc(x.noKuitansi)}</b></td><td><b>${esc(siswaById(x.siswaId).nama)}</b></td><td class="small">${isLes(x) ? fmtPeriod(x.periode) : `<span class="badge b-blue">${esc(x.jenis)}</span> ${esc(x.untuk || '')}`}</td><td>${esc(x.metode)}</td><td class="r num"><b>${rp(x.nominal)}</b></td><td class="nowrap"><button class="icon-btn" onclick="showDocRow('${x.id}')">${ic('file')}</button><button class="icon-btn" onclick="delBayar('${x.id}')">${ic('trash')}</button></td></tr>`).join('') || '<tr><td colspan="7"><div class="empty">Belum ada pembayaran</div></td></tr>'}
+  const rows = [...D('SPP')].filter(x => x.tanggalBayar).sort((a, b) => (b.tanggalBayar || '').localeCompare(a.tanggalBayar || '') || String(b.noKuitansi).localeCompare(String(a.noKuitansi)));
+  return `<div class="card"><div class="card-head"><input class="input" style="max-width:260px" placeholder="🔍 Cari nama / ortu / no. kuitansi…" value="${esc(S.f.rq || '')}" oninput="S.f.rq=this.value;liveFilter(this,'#rwBody')"><div class="spacer"></div><span class="muted small">${rows.length} transaksi${isOwner() ? ' · ' + rp(sum(rows, x => x.nominal)) : ''}</span><button class="btn ghost" onclick="csvRiwayat()">${ic('download')} CSV</button></div>
+  <div class="table-wrap"><table class="t"><thead><tr><th>Tanggal</th><th>No. Kuitansi</th><th>Terima dari</th><th>Untuk</th><th>Metode</th><th class="r">Jumlah</th><th></th></tr></thead><tbody id="rwBody">
+  ${rows.slice(0, 1500).map(x => `<tr${lfAttr([siswaById(x.siswaId).nama, siswaById(x.siswaId).ortu, x.siswaId, x.noKuitansi, x.untuk, fmtDate(x.tanggalBayar)].join(' '), 0, q)}><td class="nowrap">${fmtDate(x.tanggalBayar)}</td><td class="small num"><b>${esc(x.noKuitansi)}</b></td><td><b>${esc(siswaById(x.siswaId).nama)}</b></td><td class="small">${isLes(x) ? fmtPeriod(x.periode) : `<span class="badge b-blue">${esc(x.jenis)}</span> ${esc(x.untuk || '')}`}</td><td>${esc(x.metode)}</td><td class="r num"><b>${rp(x.nominal)}</b></td><td class="nowrap"><button class="icon-btn" title="Lihat kuitansi" onclick="showDocRow('${x.id}')">${ic('file')}</button>${canPay() ? `<button class="icon-btn" title="Edit (salah tulis)" onclick="formEditBayar('${x.id}')">${ic('edit')}</button><button class="icon-btn" title="Hapus" onclick="delBayar('${x.id}')">${ic('trash')}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7"><div class="empty">Belum ada pembayaran</div></td></tr>'}
   </tbody></table></div></div>`;
 }
 function showDocRow(id) {
   const x = D('SPP').find(r => r.id === id), s = siswaById(x.siswaId);
   if (!x.tanggalBayar) return formBayarLain(id);
-  modal('Kuitansi Pembayaran', kuitansiHtml(s, x, S.settings), `<button class="btn ghost" onclick="printModal('.kw','Kuitansi ${esc(s.nama)}')">${ic('print')} Cetak / PDF</button><button class="btn ghost" title="Kirim teks saja" onclick="waBiayaLain('${id}')">${ic('wa')} Teks</button>${imgBtn(s.waOrtu, kwCaption(s, x))}`, true);
+  modal('Kuitansi Pembayaran', kuitansiHtml(s, x, S.settings), `<button class="btn ghost" onclick="printModal('.kw','Kuitansi ${esc(s.nama)}')">${ic('print')} Cetak / PDF</button><button class="btn ghost" title="Kirim teks saja" onclick="waBiayaLain('${id}')">${ic('wa')} Teks</button>${imgBtn(s.waOrtu, kwCaption(s, x))}${canPay() ? `<button class="icon-btn" title="Edit pembayaran (salah tulis)" onclick="formEditBayar('${id}')">${ic('edit')}</button><button class="icon-btn" title="Hapus" onclick="delBayar('${id}')">${ic('trash')}</button>` : ''}`, true);
   prepDocImage('.kw', 'Kuitansi ' + s.nama + ' ' + x.noKuitansi);
+}
+/* koreksi kuitansi yang salah tulis — no. kuitansi tetap, keuangan ikut terhitung ulang otomatis */
+function formEditBayar(id) {
+  const x = D('SPP').find(r => r.id === id); if (!x) return;
+  const s = siswaById(x.siswaId), les = isLes(x);
+  modal('Edit pembayaran — ' + esc(x.noKuitansi || ''), `<form id="fEB" class="form-grid" onsubmit="event.preventDefault();saveEditBayar('${id}')">
+    <div class="field full"><label>Terima dari</label>${pickBox('siswaId', siswaItems(D('Siswa').filter(z => z.status !== 'Baru' || z.id === x.siswaId)), x.siswaId, 'ketik nama siswa / ID…')}</div>
+    ${les ? `<div class="field"><label>Bulan les</label><select class="input" name="periode">${monthOptions(x.periode, 14, 3)}</select></div>` : ''}
+    <div class="field"><label>Jumlah (Rp)</label><input class="input" name="nominal" inputmode="numeric" required value="${esc(x.nominal)}"></div>
+    <div class="field"><label>Tanggal bayar</label><input class="input" type="date" name="tanggalBayar" required value="${esc(x.tanggalBayar || todayStr())}"></div>
+    <div class="field"><label>Metode</label><select class="input" name="metode">${optList(['Tunai', 'Transfer', 'QRIS', 'DANA'].concat(x.metode && !['Tunai', 'Transfer', 'QRIS', 'DANA'].includes(x.metode) ? [x.metode] : []), x.metode)}</select></div>
+    <div class="field full"><label>Untuk pembayaran</label><input class="input" name="untuk" value="${esc(x.untuk || '')}"></div>
+    <div class="field full"><label>Catatan</label><input class="input" name="catatan" value="${esc(x.catatan || '')}"></div>
+    <p class="full hint">No. kuitansi tetap <b>${esc(x.noKuitansi || '-')}</b>. Tagihan siswa & laporan Keuangan otomatis ikut terhitung ulang.</p>
+  </form>`, `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="$('#fEB').requestSubmit()">Simpan perubahan</button>`);
+}
+async function saveEditBayar(id) {
+  const f = formData($('#fEB')); f.nominal = digits(f.nominal);
+  if (!f.siswaId) return toast('Pilih siswa dari daftar', true);
+  if (!+f.nominal) return toast('Isi jumlah pembayaran', true);
+  try { await saveRow('SPP', Object.assign({ id }, f)); toast('Pembayaran diperbarui ✓'); renderAdmin(); showDocRow(id); } catch (e) { toast(e.message, true); }
 }
 /* ---- biaya pendaftaran, buku & lain-lain ---- */
 function biayaLain() {
@@ -2468,7 +2593,7 @@ function formGuru(id) {
 }
 async function saveGuru(id) {
   const f = formData($('#fGuru'));
-  try { const r = await saveRow('Guru', Object.assign(id ? { ...guruById(id) } : {}, f, id ? { id } : {})); closeModal(); toast(`Data ${r.nama} tersimpan (${r.id})`); renderPage(); } catch (e) { toast(e.message, true); }
+  try { const r = await saveRow('Guru', id ? Object.assign({}, f, { id }) : f); closeModal(); toast(`Data ${r.nama} tersimpan (${r.id})`); renderPage(); } catch (e) { toast(e.message, true); }
 }
 function delGuru(id) { confirmBox(`Hapus guru <b>${esc(guruById(id).nama)}</b>? Saran: ubah status menjadi Nonaktif bila hanya berhenti mengajar.`, async () => { await removeRow('Guru', id); renderPage(); }); }
 function waGuru(id) {
@@ -2478,7 +2603,7 @@ function waGuru(id) {
 }
 
 /* ================= GAJI GURU ================= */
-/* honor 1 sesi = fee tentor sesuai jenis kelas, jumlah & jenjang anak yang hadir, × durasi + transport (privat rumah) sekali per sesi */
+/* honor 1 sesi = fee tentor sesuai jenis kelas, jumlah & jenjang anak yang hadir, × durasi. Transport (privat rumah) = sekali per anak per bulan */
 function jadwalOfSesi(x, rows) {
   const jid = (rows.find(r => r.jadwalId) || {}).jadwalId;
   return D('Jadwal').find(j => j.id === jid) || jadwalOn(D('Jadwal'), x.tanggal).find(j => j.guruId === x.guruId && j.jamMulai === x.jam) || null;
@@ -2494,15 +2619,17 @@ function gajiCalc(g, p) {
   const rec = D('Gaji').find(x => x.guruId === g.id && x.periode === p);
   if (rec && rec.tanggalBayar && rec.rincian) return gajiFromRec(rec);
   const rows = D('Absensi').filter(a => a.guruId === g.id && inGaji(a.tanggal, p));
-  const by = {};
+  const by = {}, tr = {};
   groupSesiJAdm(rows).forEach(x => {
     const rr = rows.filter(a => sesiKey(a) === x.key), h = sesiHonor(g, x, rr);
     const who = h.info.jenis === 'Klasikal' ? (h.j ? `${h.j.tanggal ? fmtDate(h.j.tanggal) : h.j.hari} ${h.j.jamMulai}${h.j.lokasi ? ' · ' + h.j.lokasi : ''}` : 'Sesi tambahan') : x.siswa.map(id => siswaById(id).nama).sort().join(', ');
     const lbl = h.row ? feeRowLabel(h.row) + (h.row.guruId ? ' (fee khusus)' : '') : `${h.info.jenis} · ${h.info.n} anak · ${h.info.jj.join(' & ')} (fee belum diatur)`;
     const key = [lbl, who, h.fee, h.exact ? 's' : 'j'].join('|');
     const L = by[key] = by[key] || { nama: who, paket: lbl, satuan: h.exact ? 'Per sesi' : 'Per jam', n: 0, jam: 0, fee: h.fee, honor: 0, transport: 0, ids: {} };
-    L.n++; L.jam += h.dur; L.honor += h.honor; L.transport += h.transport; x.siswa.forEach(id => L.ids[id] = 1);
+    L.n++; L.jam += h.dur; L.honor += h.honor; x.siswa.forEach(id => L.ids[id] = 1);
+    if (h.transport) x.siswa.forEach(id => { if (!tr[id] || h.transport > tr[id].amt) tr[id] = { amt: h.transport, key }; });
   });
+  Object.values(tr).forEach(t => by[t.key].transport += t.amt);
   const lines = Object.values(by).map(l => ({ nama: l.nama, paket: l.paket, satuan: l.satuan, n: l.n, jam: Math.round(l.jam * 100) / 100, anak: Object.keys(l.ids).length, fee: l.fee, honor: l.honor, transport: l.transport })).sort((a, b) => b.honor - a.honor);
   const pokok = sum(lines, l => l.honor), transport = sum(lines, l => l.transport);
   const tambahan = tambahanOf(rec), tamb = tambahanTotal(tambahan);
@@ -2687,6 +2814,13 @@ function pgKeuangan() {
   <div class="card"><h3>Transaksi manual — ${fmtPeriod(p)}</h3>
   <div class="table-wrap"><table class="t"><thead><tr><th>Tanggal</th><th>Tipe</th><th>Kategori</th><th>Keterangan</th><th class="r">Nominal</th><th></th></tr></thead><tbody>
   ${manual.map(x => `<tr><td class="nowrap">${fmtDate(x.tanggal)}</td><td><span class="badge ${x.tipe === 'Pemasukan' ? 'b-green' : x.tipe === 'Simpanan' ? 'b-purple' : 'b-red'}">${esc(x.tipe)}</span></td><td>${esc(x.kategori)}</td><td class="small">${esc(x.keterangan || '')}</td><td class="r num"><b>${+x.nominal < 0 ? '−' + rp(-x.nominal) : rp(x.nominal)}</b>${x.tipe === 'Simpanan' ? `<div class="small muted">${+x.nominal < 0 ? 'ambil' : 'setor'}</div>` : ''}</td><td class="nowrap r"><button class="icon-btn" onclick="formKeu('${x.id}')">${ic('edit')}</button><button class="icon-btn" onclick="delKeu('${x.id}')">${ic('trash')}</button></td></tr>`).join('') || '<tr><td colspan="6"><div class="empty">Belum ada transaksi manual bulan ini</div></td></tr>'}
+  </tbody></table></div></div>
+  <div class="card"><div class="card-head"><h3>Transaksi otomatis — ${fmtPeriod(p)}</h3><div class="spacer"></div><input class="input" style="max-width:240px" placeholder="🔍 Cari nama / no. kuitansi…" oninput="liveFilter(this,'#keuAuto')"></div>
+  <p class="small muted" style="margin-bottom:8px">Dari kuitansi pembayaran & slip gaji yang sudah dibayar. Salah tulis? Klik ✏️ untuk <b>edit</b> atau 🗑 untuk hapus — angka Keuangan otomatis ikut berubah.</p>
+  <div class="table-wrap"><table class="t"><thead><tr><th>Tanggal</th><th>Sumber</th><th>Keterangan</th><th class="r">Nominal</th><th></th></tr></thead><tbody id="keuAuto">
+  ${[...k.spp.map(x => ({ t: x.tanggalBayar, x, kw: 1 })), ...k.gaji.map(x => ({ t: x.tanggalBayar, x }))].sort((a, b) => String(b.t).localeCompare(String(a.t))).map(({ x, kw }) => kw
+    ? `<tr${lfAttr([siswaById(x.siswaId).nama, x.noKuitansi, x.untuk].join(' '))}><td class="nowrap">${fmtDate(x.tanggalBayar)}</td><td><span class="badge b-green">Kuitansi</span></td><td class="small"><b>${esc(siswaById(x.siswaId).nama)}</b> · ${esc(x.noKuitansi || '')}<div class="muted">${esc(x.untuk || (isLes(x) ? 'Les ' + fmtPeriod(x.periode) : x.jenis))} · ${esc(x.metode || '')}</div></td><td class="r num"><b>${rp(x.nominal)}</b></td><td class="nowrap r"><button class="icon-btn" title="Lihat kuitansi" onclick="showDocRow('${x.id}')">${ic('file')}</button><button class="icon-btn" title="Edit" onclick="formEditBayar('${x.id}')">${ic('edit')}</button><button class="icon-btn" title="Hapus" onclick="delBayar('${x.id}')">${ic('trash')}</button></td></tr>`
+    : `<tr${lfAttr([guruById(x.guruId).nama, 'gaji'].join(' '))}><td class="nowrap">${fmtDate(x.tanggalBayar)}</td><td><span class="badge b-red">Gaji guru</span></td><td class="small"><b>${esc(guruById(x.guruId).nama)}</b><div class="muted">honor ${esc(fmtGaji(x.periode))}</div></td><td class="r num"><b>−${rp(x.total)}</b></td><td class="nowrap r"><button class="icon-btn" title="Slip" onclick="slipGaji('${x.guruId}','${x.periode}')">${ic('file')}</button><button class="icon-btn" title="Batalkan status dibayar (lalu bisa diedit)" onclick="batalGaji('${x.guruId}','${x.periode}')">${ic('edit')}</button></td></tr>`).join('') || '<tr><td colspan="5"><div class="empty">Belum ada transaksi otomatis bulan ini</div></td></tr>'}
   </tbody></table></div></div>`;
 }
 function formKeu(id, tipe) {
@@ -2814,7 +2948,10 @@ function pgPengaturan() {
     <div class="card"><h3>Link pendaftaran</h3><p class="small muted" style="margin-bottom:10px">Bagikan ke calon murid / tentor. Hasil formulir langsung masuk portal (Data Siswa → Pendaftar baru, Rekrutmen Tentor).</p>
       <div class="row"><button class="btn ghost" onclick="shareLink('daftar=murid','Formulir pendaftaran murid baru')">${ic('link')} Murid baru</button><button class="btn ghost" onclick="shareLink('daftar=tentor','Formulir pendaftaran tentor')">${ic('link')} Tentor baru</button></div></div>
     <div class="card"><h3>Tanda tangan & stempel</h3><p class="small muted" style="margin-bottom:10px">Foto/scan tanda tangan (lebih bagus latar putih / PNG transparan). Tampil di raport & kuitansi.</p>
-      <div class="grid g2 keep" style="gap:10px">${sig('ttdKepala', 'Kepala (+ stempel) — raport')}${sig('ttdAkademik', 'Akademik — raport')}${sig('ttdPenerima', 'Penerima — kuitansi')}</div></div>
+      <div class="grid g2 keep" style="gap:10px">${sig('ttdKepala', 'Kepala (+ stempel) — raport')}${sig('ttdAkademik', 'Akademik — raport')}${sig('ttdPenerima', 'Penerima — kuitansi')}
+        <div class="sig-box"><b class="small">Stempel — kuitansi</b><div class="pv">${stempelOf(s) ? `<img src="${stempelOf(s)}" alt="" style="max-height:90px">` : '<span class="small muted">tanpa stempel</span>'}</div>
+          <div class="row"><label class="btn sm ghost" style="cursor:pointer">${ic('upload')} Unggah stempel<input type="file" accept="image/*" class="hidden" onchange="uploadTtd('stempel',this)"></label>${s.stempel ? `<button class="btn sm ghost" onclick="hapusTtd('stempel')">${ic('trash')} Hapus</button>` : `<select class="input" style="width:auto;padding:6px 8px" onchange="saveSettingsObj({stempelAuto:this.value})">${optList([['Ya', 'Stempel otomatis'], ['Tidak', 'Tanpa stempel']], s.stempelAuto || 'Ya')}</select>`}</div>
+          <span class="hint">Unggah foto stempel asli (PNG latar transparan paling bagus). Tanpa unggahan → stempel bulat otomatis dari nama lembaga & kota.</span></div></div></div>
     ${pw}${koneksi}
   </div></div>`;
 }
@@ -3330,7 +3467,7 @@ function renderOrtu() {
     <div class="grid g4">
       <div class="stat bg-blue" style="cursor:pointer" onclick="S.tab.ortu='absen';renderOrtu()"><span class="lbl">Hadir ${BULAN[+p.slice(5) - 1]}</span><span class="val num">${ab.length}</span><span class="sub">sesi →</span></div>
       <div class="stat bg-matcha"><span class="lbl">Paket</span><span class="val" style="font-size:16px;line-height:1.25">${esc(s.paket || '-')}</span><span class="sub">${esc(kelasLabel(s))}${s.homeVisit === 'Ya' ? ' · home visit' : ''}</span></div>
-      <div class="stat bg-yellow"><span class="lbl">Biaya les</span><span class="val num" style="font-size:20px">${rp(lg.t.tarif)}<small style="font-size:13px">/${lg.t.perJam ? 'jam' : 'bulan'}</small></span><span class="sub">${lg.t.transport ? '+ transport ' + rp(lg.t.transport) + '/pertemuan · ' : ''}${dueTxt}</span></div>
+      <div class="stat bg-yellow"><span class="lbl">Biaya les</span><span class="val num" style="font-size:20px">${rp(lg.t.tarif)}<small style="font-size:13px">/${unitBayar(lg.t)}</small></span><span class="sub">${lg.t.transport ? '+ transport ' + rp(lg.t.transport) + '/pertemuan · ' : ''}${dueTxt}</span></div>
       <div class="stat bg-orange" style="cursor:pointer" onclick="S.tab.ortu='harian';renderOrtu()"><span class="lbl">Laporan</span><span class="val num">${rps.filter(r => !isSem(r)).length}</span><span class="sub">${rps.filter(r => !isSem(r))[0] ? 'terbaru ' + fmtPeriod(rps.filter(r => !isSem(r))[0].periode) : 'belum ada'} →</span></div>
     </div>
     <div class="grid g2">
@@ -3361,10 +3498,15 @@ function renderOrtu() {
     body = `<div class="card"><h3>Rapot</h3><p class="small muted" style="margin:-4px 0 8px">Rapot perkembangan belajar, terbit 6 bulan sekali.</p>${rps.filter(isSem).map(r => `<div class="li"><div class="avatar" style="background:var(--orange-50)">📄</div><div class="meta"><b>${periodeLabel(r)}</b><span class="small muted">${esc(r.paket || '')}${r.pertemuan ? ` · hadir ${esc(r.hadir)}/${esc(r.pertemuan)}` : +r.hadir ? ` · hadir ${esc(r.hadir)} sesi` : ''}</span></div><button class="btn sm" onclick="ortuRaport('${r.id}')">Lihat / Cetak</button></div>`).join('') || '<div class="empty">Belum ada rapot</div>'}</div>`;
   }
   $('#app').innerHTML = kidTop('Portal Orang Tua') + `<div class="kid-wrap">
-    <div class="hero"><div class="avatar" style="width:64px;height:64px;font-size:22px;position:relative;z-index:1;transform:rotate(-4deg);background:#fff">${initials(s.nama)}</div><div><h2>${esc(s.nama)}</h2><p>${esc(s.id)} · ${esc(kelasLabel(s))} · ${stBadge(s.status)}</p></div></div>
+    ${(S.me.keluarga || []).length > 1 ? `<div class="card" style="padding:12px 14px"><div class="small muted" style="margin-bottom:6px">👨‍👩‍👧 Anak / paket di akun ini — ketuk untuk melihat:</div><div class="chips">${S.me.keluarga.map(k => `<button class="chip ${k.id === s.id ? 'on' : ''}" onclick="gantiAnak('${k.id}')">${esc(k.panggilan || k.nama)}${k.paket ? ` <span class="small" style="opacity:.75">· ${esc(k.paket)}</span>` : ''}</button>`).join('')}</div></div>` : ''}
+    <div class="hero"><div class="avatar" style="width:64px;height:64px;font-size:22px;position:relative;z-index:1;transform:rotate(-4deg);background:#fff">${initials(s.nama)}</div><div><h2>${esc(s.nama)}</h2><p>${esc(s.id)} · ${esc(kelasLabel(s))} · ${stBadge(s.status)}${s.paket ? ' · ' + esc(s.paket) : ''}</p></div></div>
     ${tabBar('ortu', [['ringkas', 'Ringkasan'], ['absen', 'Kehadiran'], ['harian', 'Laporan Bulanan'], ['raport', 'Rapot'], ['bayar', `Pembayaran${unpaid.length || lainBelum.length ? ' 🔴' : ''}`], ['akun', 'Akun']], t, 'renderOrtu')}
     ${body}
   </div>`;
+}
+async function gantiAnak(id) {
+  if (S.me && S.me.siswa && S.me.siswa.id === id) return;
+  try { const r = await call('me', { anak: id }); S.me = r.data; S.settings = r.data.settings; S._olg = null; S.f.oP = ''; renderOrtu(); window.scrollTo(0, 0); } catch (e) { toast(e.message, true); }
 }
 function ortuWaBayar(per) {
   const s = S.me.siswa;
