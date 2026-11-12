@@ -2688,7 +2688,8 @@ function pgGaji() {
   const p = S.f.gjP || addMonths(thisPeriod(), 0), all = S.f.gjAll === '1';
   let rows = D('Guru').map(g => ({ g, c: gajiCalc(g, p) }));
   if (!all) rows = rows.filter(r => r.c.lines.length || r.c.rec);
-  rows.sort((a, b) => (a.c.paid - b.c.paid) || b.c.total - a.c.total);
+  const so = S.f.gjSort || 'abc', q = S.f.gjQ || '';
+  rows.sort(so === 'belum' ? (a, b) => (a.c.paid - b.c.paid) || a.g.nama.localeCompare(b.g.nama) : so === 'total' ? (a, b) => b.c.total - a.c.total : (a, b) => a.g.nama.localeCompare(b.g.nama));
   const tot = sum(rows, r => r.c.total), paid = sum(rows.filter(r => r.c.paid), r => r.c.total);
   return `<div class="grid g3">
     <div class="stat bg-blue"><span class="lbl">Total honor ${fmtPeriod(p)}</span><span class="val num">${rp(tot)}</span><span class="sub">${rows.filter(r => r.c.total).length} guru</span></div>
@@ -2696,10 +2697,12 @@ function pgGaji() {
     <div class="stat bg-red"><span class="lbl" style="color:var(--red-d)">Belum dibayar</span><span class="val num" style="color:var(--red-d)">${rp(tot - paid)}</span><span class="sub">${rows.filter(r => !r.c.paid && r.c.total).length} guru</span></div></div>
   <div class="card"><p class="small" style="margin-bottom:8px">📅 Periode honor <b>${esc(gajiRangeLbl(p))}</b> · dibayar tiap <b>tgl ${esc(S.settings.tglGajiGuru || 30)}–31</b> (ubah di Pengaturan → Biaya & jatuh tempo).</p><div class="card-head"><select class="input" style="max-width:320px" onchange="setF('gjP',this.value)">${gajiOptions(p)}</select>
     <div class="chips"><button class="chip ${!all ? 'on' : ''}" onclick="setF('gjAll','0')">Ada honor</button><button class="chip ${all ? 'on' : ''}" onclick="setF('gjAll','1')">Semua guru</button></div>
+    <input class="input" style="max-width:220px" placeholder="🔍 Cari nama guru…" value="${esc(q)}" oninput="S.f.gjQ=this.value;liveFilter(this,'#gjBody')"><span class="small muted" id="gjBodyN"></span>
+    <select class="input" style="max-width:170px" title="Urutan" onchange="setF('gjSort',this.value)">${optList([['abc', 'Nama A–Z'], ['belum', 'Belum dibayar dulu'], ['total', 'Total terbesar']], so)}</select>
     <div class="spacer"></div><button class="btn ghost" onclick="csvGaji('${p}')">${ic('download')} Unduh Excel (CSV)</button></div>
   <p class="small muted" style="margin-bottom:8px">Honor dihitung <b>per sesi</b> dari tabel <b>Fee Tentor</b> (Paket & Fee Tentor): jenis kelas × <b>jumlah anak yang hadir</b> × jenjang siswa × durasi · fee khusus tentor didahulukan · + transport privat rumah · + komponen tambahan (admin, bonus, lemburan, tunjangan) − potongan. Saat ditandai <b>Bayar</b>, rincian dikunci jadi slip.</p>
-  <div class="table-wrap"><table class="t"><thead><tr><th>Guru</th><th class="c">Pertemuan</th><th class="r">Honor</th><th class="r">Transport</th><th class="r">Tambahan</th><th class="r">Potongan</th><th class="r">Total</th><th>Status</th><th></th></tr></thead><tbody>
-  ${rows.map(({ g, c }) => `<tr class="${c.paid || !c.total ? '' : 'unpaid'}"><td><b>${esc(g.nama)}</b><div class="small muted">${esc((c.rec && c.paid && c.rec.jenjang) || levelOf(g))}${g.metodeBayar ? ' · ' + esc(g.metodeBayar) + ' ' + esc(g.noRekening || '') : ''}${c.lines.some(l => !l.fee) ? ' · <span style="color:var(--red)">ada fee Rp0</span>' : ''}</div></td>
+  <div class="table-wrap"><table class="t"><thead><tr><th>Guru</th><th class="c">Pertemuan</th><th class="r">Honor</th><th class="r">Transport</th><th class="r">Tambahan</th><th class="r">Potongan</th><th class="r">Total</th><th>Status</th><th></th></tr></thead><tbody id="gjBody">
+  ${rows.map(({ g, c }) => `<tr class="${c.paid || !c.total ? '' : 'unpaid'}"${lfAttr([g.nama, g.id, levelOf(g)].join(' '), 0, q)}><td><b>${esc(g.nama)}</b><div class="small muted">${esc((c.rec && c.paid && c.rec.jenjang) || levelOf(g))}${g.metodeBayar ? ' · ' + esc(g.metodeBayar) + ' ' + esc(g.noRekening || '') : ''}${c.lines.some(l => !l.fee) ? ' · <span style="color:var(--red)">ada fee Rp0</span>' : ''}</div></td>
     <td class="c num"><b>${c.sesi}</b></td><td class="r num">${rp(c.pokok)}</td><td class="r num">${c.transport ? rp(c.transport) : '-'}</td><td class="r num">${c.tamb + c.bonus ? rp(c.tamb + c.bonus) + `<div class="small muted">${c.tambahan.map(t => esc(t.nama)).join(', ')}</div>` : '-'}</td><td class="r num">${c.pot ? '−' + rp(c.pot) : '-'}</td><td class="r num"><b>${rp(c.total)}</b></td>
     <td>${c.paid ? `<span class="badge b-green">✓ Dibayar</span><div class="small muted">${fmtDate(c.rec.tanggalBayar)}</div>` : c.total ? '<span class="badge b-red">Belum</span>' : '<span class="badge b-gray">-</span>'}</td>
     <td class="nowrap r"><button class="icon-btn" title="Rincian & slip" onclick="slipGaji('${g.id}','${p}')">${ic('file')}</button>${c.paid ? `<button class="icon-btn" title="Batalkan status dibayar" onclick="batalGaji('${g.id}','${p}')">${ic('x')}</button>` : `<button class="icon-btn" title="Tambahan / potongan" onclick="formGaji('${g.id}','${p}')">${ic('edit')}</button>${c.total ? `<button class="btn sm" onclick="bayarGaji('${g.id}','${p}')">Bayar</button>` : ''}`}</td></tr>`).join('') || `<tr><td colspan="9"><div class="empty">Belum ada honor di ${fmtPeriod(p)}. Honor muncul setelah guru mengisi sesi.</div></td></tr>`}
@@ -2751,7 +2754,7 @@ function waSlip(gid, p) {
 function csvGaji(p) {
   const rows = [['ID', 'Guru', 'Kelas / anak', 'Paket', 'Pertemuan', 'Jam', 'Fee', 'Honor', 'Transport']];
   const sumRows = [['ID', 'Guru', 'Jenjang', 'Pertemuan', 'Honor', 'Transport', 'Tambahan', 'Potongan', 'Total', 'Tanggal bayar', 'Bayar ke', 'No. rekening', 'Atas nama']];
-  D('Guru').forEach(g => { const c = gajiCalc(g, p); if (!c.lines.length && !c.rec) return; c.lines.forEach(l => rows.push([g.id, g.nama, l.nama, l.paket, l.n, l.jam || '', l.fee, l.honor, l.transport])); c.tambahan.forEach(t => rows.push([g.id, g.nama, t.nama, 'tambahan', t.qty, '', t.fee, t.qty * t.fee, ''])); sumRows.push([g.id, g.nama, levelOf(g), c.sesi, c.pokok, c.transport, c.tamb + c.bonus, c.pot, c.total, c.rec ? c.rec.tanggalBayar : '', g.metodeBayar || '', g.noRekening || '', g.atasNama || '']); });
+  guruAbc().forEach(g => { const c = gajiCalc(g, p); if (!c.lines.length && !c.rec) return; c.lines.forEach(l => rows.push([g.id, g.nama, l.nama, l.paket, l.n, l.jam || '', l.fee, l.honor, l.transport])); c.tambahan.forEach(t => rows.push([g.id, g.nama, t.nama, 'tambahan', t.qty, '', t.fee, t.qty * t.fee, ''])); sumRows.push([g.id, g.nama, levelOf(g), c.sesi, c.pokok, c.transport, c.tamb + c.bonus, c.pot, c.total, c.rec ? c.rec.tanggalBayar : '', g.metodeBayar || '', g.noRekening || '', g.atasNama || '']); });
   downloadFile(`Gaji-Guru-${p}.csv`, toCSV(sumRows.concat([[]], [['RINCIAN']], rows)));
 }
 
