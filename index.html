@@ -611,7 +611,9 @@ const KATEGORI = ['Klasikal', 'Klasikal Khusus', 'Privat', 'Privat Home', 'Home 
 const TIPE_KELAS = ['Klasikal', 'Rombel', 'Privat Bimbel', 'Privat Rumah', 'Privat Bimbel Khusus', 'Home Visit'];
 const METODE_GAJI = ['DANA', 'BRI', 'Mandiri', 'BNI', 'BCA', 'BSI', 'BTN', 'ShopeePay', 'Cash', 'Lain-lain'];
 const STATUS_TENTOR = ['Baru', 'Diundang Interview', 'Ditolak', 'Diterima', 'Diterima - Menunggu Murid'];
-const PAKET_FORM = ['Klasikal', 'Privat di rumah Murid', 'Privat di tempat Bimbel', 'Home Visit'];
+const PAKET_FORM = ['Klasikal', 'Privat di rumah Murid', 'Privat di tempat Bimbel', 'Privat Bimbel Khusus (2–3 anak)', 'Home Visit (2–4 anak)'];
+/* paket kelompok: jumlah anak [min, max] — formulir minta nama anak lainnya */
+const paketKelompok = p => /home/i.test(p || '') ? [2, 4] : /khusus/i.test(p || '') ? [2, 3] : null;
 const KELAS_FORM = ['TK/ Paud', 'SD Kelas 1', 'SD Kelas 2', 'SD Kelas 3', 'SD Kelas 4', 'SD Kelas 5', 'SD Kelas 6', 'SMP Kelas 1', 'SMP Kelas 2', 'SMP Kelas 3', 'SMA Kelas X', 'SMA Kelas XI', 'SMA Kelas XII'];
 const ROLE_LABEL = { owner: 'Owner', akademik: 'Admin Akademik', admin2: 'Admin' };
 const listOf = k => String((S.settings || {})[k] || '').split(/\n|,/).map(x => x.trim()).filter(Boolean);
@@ -693,7 +695,7 @@ function kuitansiHtml(s, pay, st) {
    TAGIHAN LES
    • Paket "Per bulan" (klasikal): tarif tetap per bulan
    • Paket "Per jam" (privat, home visit): jam hadir × tarif (1,5 jam = 1,5 × tarif)
-   • Home visit / privat rumah: + transport per pertemuan
+   • Home visit / privat rumah: + transport SEKALI per bulan (bila ada pertemuan di bulan itu)
    • Bayar boleh dicicil (tiap bayar = 1 kuitansi); kelebihan jadi DEPOSIT bulan berikutnya
    ========================================================= */
 const isPerJam = pk => !!pk && /jam/i.test(pk.satuan || '');
@@ -713,10 +715,10 @@ function tarifSiswa(s, pk, tp) {
     transport: s.homeVisit === 'Ya' ? (tk !== '' ? +tk || 0 : (tp ? +tp.harga || 0 : 0)) : 0
   };
 }
-const tarifLabel = t => `${rp(t.tarif)}/${unitBayar(t)}${t.transport ? ' + transport ' + rp(t.transport) + '/pertemuan' : ''}`;
+const tarifLabel = t => `${rp(t.tarif)}/${unitBayar(t)}${t.transport ? ' + transport ' + rp(t.transport) + '/bulan' : ''}`;
 function hitungTagihan(t, abs) {
   const sesi = abs.length, jam = Math.round(sum(abs, durasiOf) * 100) / 100;
-  const les = t.mode === 'ptm' ? sesi * t.tarif : t.perJam ? Math.round(jam * t.tarif) : t.tarif, transport = t.transport * sesi;
+  const les = t.mode === 'ptm' ? sesi * t.tarif : t.perJam ? Math.round(jam * t.tarif) : t.tarif, transport = t.transport && (sesi > 0 || !t.perJam) ? t.transport : 0;
   return { sesi, jam, les, transport, nominal: les + transport };
 }
 /* o = { pk, tp, abs: kehadiran siswa, spp: pembayaran les siswa, st: pengaturan, upto } */
@@ -820,7 +822,7 @@ function tagihanHtml(s, periode, e, st) {
     </table>
     <table class="lines"><tbody>
       ${line(`Les ${e.t.perJam ? 'privat' : 'bulanan'} — ${fmtPeriod(periode)}`, e.t.mode === 'ptm' ? `${e.tag.sesi} pertemuan × ${rp(e.t.tarif)}` : e.t.perJam ? `${e.tag.sesi} pertemuan · ${fmtJam(e.tag.jam)} jam × ${rp(e.t.tarif)}` : 'per bulan', rp(e.tag.les))}
-      ${e.tag.transport ? line('Transport', `${e.tag.sesi} pertemuan × ${rp(e.t.transport)}`, rp(e.tag.transport)) : ''}
+      ${e.tag.transport ? line('Transport', 'per bulan', rp(e.tag.transport)) : ''}
       ${e.carryIn ? line('Deposit / kelebihan bayar sebelumnya', '', '−' + rp(Math.min(e.carryIn, e.tag.nominal))) : ''}
       ${e.paid ? line('Sudah dibayar', e.rows.map(r => esc(r.noKuitansi)).join(', '), '−' + rp(e.paid)) : ''}
     </tbody></table>
@@ -1181,8 +1183,11 @@ const Mock = (() => {
     if (a === 'daftarMurid') {
       const d = req.data || {}; if (!str(d.nama) || !str(d.ortu) || !str(d.waOrtu)) return { ok: false, error: 'Lengkapi nama, nama orang tua & nomor WhatsApp.' };
       const kl = kelasForm(d.kelas);
-      const r = upsert('Siswa', { nama: str(d.nama), ortu: str(d.ortu), paketDiminta: str(d.paket), jenjang: kl[0], kelas: kl[1], sekolah: str(d.sekolah), tempatLes: str(d.tempatLes), jadwalDiminta: str(d.jadwal), alamat: str(d.alamat), mapsUrl: /^https?:\/\//i.test(str(d.mapsUrl, 300)) ? str(d.mapsUrl, 300) : '', waOrtu: str(d.waOrtu), waSiswa: str(d.waSiswa), jk: 'P', status: 'Baru', tglDaftar: todayStr(), homeVisit: /home/i.test(d.paket) ? 'Ya' : 'Tidak' });
-      save(); return { ok: true, id: r.id };
+      const base = { nama: str(d.nama), ortu: str(d.ortu), paketDiminta: str(d.paket), jenjang: kl[0], kelas: kl[1], sekolah: str(d.sekolah), tempatLes: str(d.tempatLes), jadwalDiminta: str(d.jadwal), alamat: str(d.alamat), mapsUrl: /^https?:\/\//i.test(str(d.mapsUrl, 300)) ? str(d.mapsUrl, 300) : '', waOrtu: str(d.waOrtu), waSiswa: str(d.waSiswa), jk: 'P', status: 'Baru', tglDaftar: todayStr(), homeVisit: /home/i.test(d.paket) ? 'Ya' : 'Tidak' };
+      const anak = (d.anak || []).filter(x => str(x.nama)).slice(0, 3);
+      if (anak.length) base.kelompok = (/home/i.test(d.paket) ? 'HV ' : 'Privat khusus ') + base.ortu.split(' ').slice(0, 3).join(' ');
+      const ids = [upsert('Siswa', base).id].concat(anak.map(x => { const k = x.kelas ? kelasForm(x.kelas) : kl; return upsert('Siswa', Object.assign({}, base, { id: '', nama: str(x.nama), jenjang: k[0], kelas: k[1], sekolah: str(x.sekolah) || base.sekolah, jk: '' })).id; }));
+      save(); return { ok: true, id: ids[0], ids };
     }
     if (a === 'daftarTentor') {
       const d = req.data || {}; if (!str(d.nama) || !str(d.wa)) return { ok: false, error: 'Lengkapi nama & nomor WhatsApp.' };
@@ -1434,7 +1439,7 @@ function jenisSesi(kids, j) {
   let jenis = /klasikal|rombel/i.test(tipe) ? 'Klasikal' : /home/i.test(tipe) ? 'Home Visit' : /rumah/i.test(tipe) ? 'Privat' : /privat/i.test(tipe) ? 'Privat Bimbel' : '';
   if (!jenis) jenis = kat.includes('Home Visit') ? 'Home Visit' : kat.includes('Privat Home') ? 'Privat' : kat.some(k => /^Privat/.test(k)) ? 'Privat Bimbel' : 'Klasikal';
   const jj = [...new Set(kids.map(k => k.jenjang).filter(x => JJ_ORDER.includes(x)))].sort((a, b) => JJ_ORDER.indexOf(a) - JJ_ORDER.indexOf(b));
-  return { jenis, n: kids.length, jj: jj.length ? jj : ['SD'], top: jj[jj.length - 1] || 'SD' };
+  return { jenis, n: kids.reduce((t, k) => t + Math.max(1, splitNama(k.nama).length), 0), jj: jj.length ? jj : ['SD'], top: jj[jj.length - 1] || 'SD' };
 }
 /* pilih baris: jumlah anak masuk rentang (bila tidak ada → rentang terbesar di bawahnya), jenjang = rentang terkecil yang mencakup semua anak */
 function pickRows(rows, info) {
@@ -1594,8 +1599,51 @@ function pgSiswa() {
       <select class="input" style="max-width:150px" title="Urutan" onchange="S.f.siswaSort=this.value;$('#siswaList').innerHTML=siswaList()">${optList([['baru', 'Terbaru dulu'], ['lama', 'Terlama dulu'], ['nama', 'Nama A–Z']], S.f.siswaSort || 'baru')}</select>
       <button class="btn ghost" onclick="shareLink('daftar=murid','Formulir pendaftaran murid baru')">${ic('link')} Link pendaftaran</button><button class="btn ghost" onclick="csvLogin('siswa')">${ic('download')} Daftar login</button><button class="btn" onclick="formSiswa()">${ic('plus')} Tambah Siswa</button>
     </div>
+    ${(() => { const m = siswaGabung(); let hide = false; try { hide = localStorage.getItem('osin_hide_gabung') === String(m.length); } catch (e) {} return m.length && !hide ? `<div class="info-box small" style="margin:0 0 10px">👥 Ada <b>${m.length} data berisi beberapa anak dalam 1 nama</b>. Tidak apa-apa bila anaknya selalu berangkat bersama. Kalau kehadirannya bisa beda-beda, pisahkan supaya guru bisa mencentang yang hadir saja. <button class="btn sm ghost" style="margin-left:6px" onclick="listGabung()">Lihat / pisahkan</button> <button class="btn sm ghost" onclick="try{localStorage.setItem('osin_hide_gabung','${m.length}')}catch(e){};renderAdmin()">Sembunyikan</button></div>` : ''; })()}
     <div class="table-wrap" id="siswaList">${siswaList()}</div>
   </div>`;
+}
+/* ===== 1 data berisi beberapa anak (hasil impor) → pisahkan jadi siswa sendiri-sendiri ===== */
+const tcWord = w => /^[a-z]/.test(w) && w === w.toLowerCase() ? w[0].toUpperCase() + w.slice(1) : w;
+const splitNama = n => String(n || '').split(/\s*(?:,|&|\+|\/|;|\n|\bdan\b)\s*/i).map(x => x.replace(/^\s*\d+\s*[.)]?\s*/, '').replace(/\s+/g, ' ').trim()).filter(x => x.length > 1).map(x => x.split(' ').map(tcWord).join(' '));
+const siswaGabung = () => D('Siswa').filter(x => x.status !== 'Berhenti' && splitNama(x.nama).length > 1);
+function listGabung() {
+  const m = siswaGabung();
+  modal('Pisahkan data berisi beberapa anak', `<p class="small muted" style="margin-bottom:10px">Pisahkan <b>hanya bila kehadiran anaknya bisa berbeda</b> (yang satu berangkat, yang lain tidak). Kakak-adik yang selalu berangkat bersama boleh dibiarkan.</p>
+    <div class="table-wrap"><table class="t"><thead><tr><th>ID</th><th>Nama di data</th><th>Paket</th><th></th></tr></thead><tbody>
+    ${m.map(x => `<tr><td>${esc(x.id)}</td><td class="small">${esc(x.nama)}<div class="muted">${splitNama(x.nama).length} anak</div></td><td class="small">${esc(paketNama(x) || '-')}</td><td><button class="btn sm" onclick="formPisah('${x.id}')">Pisahkan</button></td></tr>`).join('') || '<tr><td colspan="4"><div class="empty">Semua sudah terpisah ✓</div></td></tr>'}
+    </tbody></table></div>`, `<button class="btn" onclick="closeModal()">Tutup</button>`, true);
+}
+function formPisah(id) {
+  const s = siswaById(id), names = splitNama(s.nama), pk = paketById(s.paketId) || {}, hv = s.homeVisit === 'Ya' || /home/i.test(pk.nama || '') || /home/i.test(pk.kategori || '');
+  const nJ = D('Jadwal').filter(j => String(j.siswaIds || '').split(',').map(x => x.trim()).includes(id)).length;
+  modal('Pisahkan anak — ' + esc(s.id), `<form id="fPisah" class="form-grid" onsubmit="event.preventDefault();savePisah('${id}')">
+    <div class="field full"><label>Nama anak — 1 nama per baris (boleh dirapikan)</label><textarea class="input" name="names" style="min-height:${Math.max(90, names.length * 28)}px">${esc(names.join('\n'))}</textarea>
+      <span class="hint">Nama pertama tetap memakai ID <b>${esc(s.id)}</b> (riwayat sesi & pembayaran lama tetap di sini). Anak lain mendapat ID baru dengan ortu, WA & <b>kode akses sama</b> → tetap 1 akun ortu.</span></div>
+    <div class="field"><label>Cara bayar tiap anak</label><select class="input" name="caraBayar">${optList(CARA_BAYAR, s.caraBayar || (hv ? 'Per pertemuan' : ''))}</select></div>
+    <div class="field"><label>Harga per anak (Rp)</label><input class="input" name="sppNominal" inputmode="numeric" placeholder="mis. 20000" value="${esc(s.sppNominal || '')}"><span class="hint">Kosong = harga paket (${esc(pk.nama || '-')})</span></div>
+    <div class="field full"><label>Nama kelompok home visit</label><input class="input" name="kelompok" value="${esc(s.kelompok || (hv ? 'HV ' + (s.ortu || names[0] || '').split(' ').slice(0, 3).join(' ') : ''))}" placeholder="kosongkan bila bukan kelompok"></div>
+    ${nJ ? `<label class="full small" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="jadwal" value="1" checked> Masukkan semua anak ke ${nJ} jadwal yang sama (guru tinggal centang siapa yang hadir)</label>` : ''}
+  </form>`, `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" onclick="$('#fPisah').requestSubmit()">Pisahkan</button>`, true);
+}
+async function savePisah(id) {
+  const s = siswaById(id), f = formData($('#fPisah'));
+  const names = String(f.names || '').split('\n').map(x => x.trim()).filter(Boolean);
+  if (names.length < 2) return toast('Isi minimal 2 nama (1 per baris)', true);
+  const ext = { caraBayar: f.caraBayar || '', sppNominal: digits(f.sppNominal || ''), kelompok: (f.kelompok || '').trim() };
+  try {
+    await saveRow('Siswa', Object.assign({ id, nama: names[0], panggilan: /[,&]/.test(s.panggilan || '') ? '' : s.panggilan || '' }, ext));
+    const baru = await saveRows('Siswa', names.slice(1).map(nama => Object.assign({}, s, ext, { id: '', nama, panggilan: '', jk: '', tglLahir: '', kelas: '', kodeOrtu: s.kodeOrtu, tglDaftar: s.tglDaftar || todayStr() })));
+    const newIds = (baru || []).map(x => x.id).filter(Boolean);
+    if (f.jadwal && newIds.length) {
+      const js = D('Jadwal').filter(j => String(j.siswaIds || '').split(',').map(x => x.trim()).includes(id))
+        .map(j => { const ids = String(j.siswaIds).split(',').map(x => x.trim()).filter(Boolean), i = ids.indexOf(id); ids.splice(i + 1, 0, ...newIds.filter(n => !ids.includes(n))); return { id: j.id, siswaIds: ids.join(',') }; });
+      if (js.length) await saveRows('Jadwal', js);
+    }
+    S._famV = (S._famV || 0) + 1;
+    toast(`Dipisah jadi ${names.length} anak: ${id}${newIds.length ? ', ' + newIds.join(', ') : ''} ✓`);
+    renderAdmin(); if (siswaGabung().length) listGabung(); else closeModal();
+  } catch (e) { toast(e.message, true); }
 }
 function siswaList() {
   const st = S.f.siswaSt || 'Aktif', q = (S.f.q || '').toLowerCase(), p = thisPeriod();
@@ -1605,7 +1653,7 @@ function siswaList() {
   if (!rows.length) return `<div class="empty">${st === 'Baru' ? 'Tidak ada pendaftar baru' : q || pk ? 'Tidak ada siswa yang cocok' : 'Belum ada data siswa'}</div>`;
   const info = `<div class="small muted" style="padding:6px 2px">${rows.length} siswa${pk ? ' · paket: ' + esc(pk === '-' ? 'belum diisi' : pk === 'hv' ? 'home visit' : pk.startsWith('k:') ? pk.slice(2) : (paketById(pk) || {}).nama || pk) : ''}</div>`;
   if (st === 'Baru') return info + `<table class="t"><thead><tr><th>Tgl daftar</th><th>Nama</th><th>Paket diminta</th><th>Tempat & jadwal</th><th>Orang tua</th><th></th></tr></thead><tbody>
-    ${rows.sort((a, b) => (b.tglDaftar || '').localeCompare(a.tglDaftar || '')).map(s => `<tr><td class="nowrap">${fmtDate(s.tglDaftar)}<div class="small muted">${esc(s.id)}</div></td><td><b>${esc(s.nama)}</b><div class="small muted">${esc(kelasLabel(s))}${s.sekolah ? ' · ' + esc(s.sekolah) : ''}</div></td>
+    ${rows.sort((a, b) => (b.tglDaftar || '').localeCompare(a.tglDaftar || '')).map(s => `<tr><td class="nowrap">${fmtDate(s.tglDaftar)}<div class="small muted">${esc(s.id)}</div></td><td><b>${esc(s.nama)}</b><div class="small muted">${esc(kelasLabel(s))}${s.sekolah ? ' · ' + esc(s.sekolah) : ''}</div>${s.kelompok ? `<div class="small"><span class="badge b-purple">👥 ${esc(s.kelompok)}</span> <span class="muted">${D('Siswa').filter(x => x.kelompok === s.kelompok).length} anak</span></div>` : ''}</td>
       <td>${esc(s.paketDiminta || '-')}</td><td class="small">${esc(s.tempatLes || '-')}<div class="muted">${esc(s.jadwalDiminta || '')}</div></td>
       <td>${esc(s.ortu || '-')}<div class="small muted">${esc(s.waOrtu || '')}${s.waSiswa ? ' · siswa ' + esc(s.waSiswa) : ''}</div></td>
       <td class="nowrap r"><button class="btn sm" onclick="formAktivasi('${s.id}')">Aktivasi</button><button class="icon-btn" title="Chat ortu" onclick="waPendaftar('${s.id}')">${ic('wa')}</button><button class="icon-btn" title="Edit" onclick="formSiswa('${s.id}')">${ic('edit')}</button><button class="icon-btn" title="Hapus" onclick="delSiswa('${s.id}')">${ic('trash')}</button></td></tr>`).join('')}</tbody></table>`;
@@ -1626,7 +1674,7 @@ function formSiswa(id) {
   const s = id ? siswaById(id) : { jk: 'P', jenjang: 'SD', status: 'Aktif', homeVisit: 'Tidak', tglMulai: todayStr(), kodeOrtu: rand4() };
   const tp = transportPaket();
   modal(id ? `Edit Siswa — ${esc(s.id)}` : 'Tambah Siswa', `<form id="fSiswa" class="form-grid" onsubmit="event.preventDefault();saveSiswa('${id || ''}')" oninput="sppPreview()">
-    <div class="field full"><label>Nama lengkap *</label><input class="input" name="nama" required value="${esc(s.nama || '')}"></div>
+    <div class="field full"><label>Nama lengkap *</label><input class="input" name="nama" required value="${esc(s.nama || '')}">${id && splitNama(s.nama).length > 1 ? `<div class="info-box small" style="margin-top:6px">👥 Berisi <b>${splitNama(s.nama).length} anak</b> dalam 1 nama — saat guru absen semuanya ikut terisi. Kalau anaknya tidak selalu berangkat bersama: <button type="button" class="btn sm" onclick="formPisah('${s.id}')">Pisahkan jadi ${splitNama(s.nama).length} anak</button></div>` : ''}</div>
     <div class="field"><label>Nama panggilan</label><input class="input" name="panggilan" value="${esc(s.panggilan || '')}"></div>
     <div class="field"><label>Jenis kelamin</label><select class="input" name="jk">${optList([['P', 'Perempuan'], ['L', 'Laki-laki']], s.jk)}</select></div>
     <div class="field"><label>Jenjang</label><select class="input" name="jenjang">${optList(JENJANG, s.jenjang)}</select></div>
@@ -1634,11 +1682,11 @@ function formSiswa(id) {
     <div class="field"><label>Asal sekolah</label><input class="input" name="sekolah" value="${esc(s.sekolah || '')}"></div>
     <div class="field"><label>Tanggal lahir</label><input class="input" type="date" name="tglLahir" value="${esc(s.tglLahir || '')}"></div>
     <div class="field full"><label>Paket belajar *</label><select class="input" name="paketId" required><option value="">— pilih paket —</option>${paketPilihan().map(p => `<option value="${p.id}" ${p.id === s.paketId ? 'selected' : ''}>${esc(p.nama)}${+p.harga ? ' · ' + rp(p.harga) : ''}</option>`).join('')}</select></div>
-    <div class="field"><label>Home visit / luar bimbel?</label><select class="input" name="homeVisit">${optList([['Tidak', 'Tidak'], ['Ya', 'Ya — kena uang transport']], s.homeVisit)}</select><span class="hint">${tp ? `Transport ${rp(tp.harga)}/pertemuan` : ''}</span></div>
+    <div class="field"><label>Home visit / luar bimbel?</label><select class="input" name="homeVisit">${optList([['Tidak', 'Tidak'], ['Ya', 'Ya — kena uang transport']], s.homeVisit)}</select><span class="hint">${tp ? `Transport ${rp(tp.harga)}/bulan` : ''}</span></div>
     <div class="field"><label>Cara bayar</label><select class="input" name="caraBayar">${optList(CARA_BAYAR, s.caraBayar || '')}</select><span class="hint">Home visit bisa per bulan atau per pertemuan</span></div>
     <div class="field"><label>Kelompok home visit (opsional)</label><input class="input" name="kelompok" list="dlKel" placeholder="mis. HV Bu Rina Patebon" value="${esc(s.kelompok || '')}"><datalist id="dlKel">${[...new Set(D('Siswa').map(x => x.kelompok).filter(Boolean))].sort().map(k => `<option value="${esc(k)}">`).join('')}</datalist><span class="hint">${s.kelompok ? 'Anggota: ' + esc(D('Siswa').filter(x => x.kelompok === s.kelompok).map(x => x.panggilan || x.nama).join(', ')) : 'Nama sama = satu kelompok (2–4 anak)'}</span></div>
     <div class="field"><label>Harga khusus (opsional)</label><input class="input" name="sppNominal" inputmode="numeric" placeholder="kosong = harga paket" value="${esc(s.sppNominal || '')}"><span class="hint" id="sppPrev"></span></div>
-    <div class="field"><label>Transport khusus / pertemuan (opsional)</label><input class="input" name="transportKhusus" inputmode="numeric" placeholder="kosong = tarif transport" value="${esc(s.transportKhusus || '')}"><span class="hint">Hanya untuk home visit / privat rumah. Isi 0 bila tanpa transport.</span></div>
+    <div class="field"><label>Transport khusus / bulan (opsional)</label><input class="input" name="transportKhusus" inputmode="numeric" placeholder="kosong = tarif transport" value="${esc(s.transportKhusus || '')}"><span class="hint">Hanya untuk home visit / privat rumah. Isi 0 bila tanpa transport.</span></div>
     <div class="field"><label>Nama orang tua/wali</label><input class="input" name="ortu" value="${esc(s.ortu || '')}"></div>
     <div class="field"><label>No. WhatsApp orang tua</label><input class="input" name="waOrtu" inputmode="tel" placeholder="08…" value="${esc(s.waOrtu || '')}"></div>
     <div class="field"><label>No. WhatsApp siswa (pengingat jadwal)</label><input class="input" name="waSiswa" inputmode="tel" placeholder="08…" value="${esc(s.waSiswa || '')}"></div>
@@ -1685,7 +1733,7 @@ function formAktivasi(id) {
     <div class="field"><label>Jenjang</label><select class="input" name="jenjang">${optList(JENJANG, s.jenjang)}</select></div>
     <div class="field"><label>Kelas</label><input class="input" name="kelas" value="${esc(s.kelas || '')}"></div>
     <div class="field full"><label>Paket belajar *</label><select class="input" name="paketId" required><option value="">— pilih paket —</option>${paketPilihan().map(p => `<option value="${p.id}" ${p.id === (s.paketId || (guess || {}).id) ? 'selected' : ''}>${esc(p.nama)}${p.harga && +p.harga ? ' · ' + rp(p.harga) : ''}</option>`).join('')}</select></div>
-    <div class="field"><label>Home visit?</label><select class="input" name="homeVisit">${optList([['Tidak', 'Tidak'], ['Ya', 'Ya — kena uang transport']], s.homeVisit)}</select><span class="hint">${tp && tp.harga ? 'Transport ' + rp(tp.harga) + '/pertemuan' : ''}</span></div>
+    <div class="field"><label>Home visit?</label><select class="input" name="homeVisit">${optList([['Tidak', 'Tidak'], ['Ya', 'Ya — kena uang transport']], s.homeVisit)}</select><span class="hint">${tp && tp.harga ? 'Transport ' + rp(tp.harga) + '/bulan' : ''}</span></div>
     <div class="field"><label>Tempat les</label><select class="input" name="tempatLes"><option value="">—</option>${optList([...new Set(listOf('lokasiList').concat(s.tempatLes ? [s.tempatLes] : []))], s.tempatLes)}</select></div>
     <div class="field"><label>Tanggal mulai les</label><input class="input" type="date" name="tglMulai" value="${todayStr()}"></div>
     <div class="field"><label>Kode akses orang tua</label><input class="input" name="kodeOrtu" value="${esc(sib[0] ? sib[0].kodeOrtu : s.kodeOrtu || rand4())}">${sib.length ? `<span class="hint">👨‍👩‍👧 Sudah ada ${esc(sib.map(x => x.nama).join(', '))} dengan WA ortu sama → kode disamakan, cukup 1 akun ortu.</span>` : ''}</div>
@@ -1766,7 +1814,7 @@ function paketTab() {
     <td class="c num">${D('Siswa').filter(s => s.paketId === p.id && s.status === 'Aktif').length}</td>
     <td><button type="button" class="icon-btn" onclick="delPaket('${p.id}')">${ic('trash')}</button></td></tr>`).join('') || '<tr><td colspan="9"><div class="empty">Belum ada paket</div></td></tr>'}
   </tbody></table></div>
-  <div class="row" style="margin-top:14px"><span class="small muted">Paket kategori <b>Transport</b> = biaya transport per pertemuan untuk siswa home visit / privat rumah (masuk tagihan ortu).</span><div class="spacer"></div><button class="btn">Simpan Semua Paket</button></div></form></div>
+  <div class="row" style="margin-top:14px"><span class="small muted">Paket kategori <b>Transport</b> = biaya transport <b>sekali per bulan</b> untuk siswa home visit / privat rumah (masuk tagihan ortu bila ada pertemuan di bulan itu).</span><div class="spacer"></div><button class="btn">Simpan Semua Paket</button></div></form></div>
   <div class="card bg-cream" style="box-shadow:var(--sh-sm)"><h3>Cara hitung</h3>
     <p class="small">• <b>Tagihan ortu</b>: klasikal per bulan sesuai paket (2x / 3x seminggu, jatuh tempo tgl ${esc(S.settings.jatuhTempo || 15)}) · privat & home visit = jam hadir × tarif + transport, ditagih tgl ${esc(S.settings.tagihAkhirMulai || 25)}, jatuh tempo tgl ${esc(S.settings.jatuhTempoAkhir || 27)}.<br>
     • <b>Honor tentor</b>: dari tab <b>Fee Tentor</b> — berdasarkan jenis kelas & <b>jumlah anak yang hadir</b> di sesi itu (klasikal 1–2 anak / 3–4 anak, home visit 2/3/4 anak), jenjang siswa, dan durasi. Tidak ikut harga paket ortu.</p></div>`;
@@ -2318,7 +2366,7 @@ function waKuitansi(id) {
 function waTagihan(sid, p) {
   const s = siswaById(sid), e = billOf(s, p), st = S.settings;
   if (!isArrear(e) && e.rows.length) return waKuitansi(e.rows[e.rows.length - 1].id);
-  openWa(s.waOrtu, `Assalamu'alaikum Bapak/Ibu ${s.ortu || ''},\n\nKami informasikan tagihan les *${st.namaLembaga}*:\n\nNama siswa: ${s.nama}\nPaket: ${paketNama(s) || '-'}\nBulan: ${fmtPeriod(p)}${e.t.mode === 'ptm' ? `\nPertemuan: ${e.tag.sesi}× ${rp(e.t.tarif)}` : e.t.perJam ? `\nPertemuan: ${e.tag.sesi}× (${fmtJam(e.tag.jam)} jam × ${rp(e.t.tarif)})` : ''}${e.tag.transport ? `\nTransport: ${e.tag.sesi} × ${rp(e.t.transport)}` : ''}\nTotal: ${rp(e.tag.nominal)}${e.carryIn ? `\nDeposit: −${rp(Math.min(e.carryIn, e.tag.nominal))}` : ''}${e.paid ? `\nSudah dibayar: −${rp(e.paid)}` : ''}\n*Sisa tagihan: ${rp(e.sisa)}*\nJatuh tempo: ${fmtDateLong(dueDateOf(e.waktu, p, st))}\n\n${caraBayarText(st)}\n\nMohon kirim bukti pembayaran ke WA admin ${waAdminOf(st)}. Terima kasih 🙏`);
+  openWa(s.waOrtu, `Assalamu'alaikum Bapak/Ibu ${s.ortu || ''},\n\nKami informasikan tagihan les *${st.namaLembaga}*:\n\nNama siswa: ${s.nama}\nPaket: ${paketNama(s) || '-'}\nBulan: ${fmtPeriod(p)}${e.t.mode === 'ptm' ? `\nPertemuan: ${e.tag.sesi}× ${rp(e.t.tarif)}` : e.t.perJam ? `\nPertemuan: ${e.tag.sesi}× (${fmtJam(e.tag.jam)} jam × ${rp(e.t.tarif)})` : ''}${e.tag.transport ? `\nTransport (per bulan): ${rp(e.tag.transport)}` : ''}\nTotal: ${rp(e.tag.nominal)}${e.carryIn ? `\nDeposit: −${rp(Math.min(e.carryIn, e.tag.nominal))}` : ''}${e.paid ? `\nSudah dibayar: −${rp(e.paid)}` : ''}\n*Sisa tagihan: ${rp(e.sisa)}*\nJatuh tempo: ${fmtDateLong(dueDateOf(e.waktu, p, st))}\n\n${caraBayarText(st)}\n\nMohon kirim bukti pembayaran ke WA admin ${waAdminOf(st)}. Terima kasih 🙏`);
 }
 function massReminder(p) {
   const list = unpaidFor(p);
@@ -3467,7 +3515,7 @@ function renderOrtu() {
     <div class="grid g4">
       <div class="stat bg-blue" style="cursor:pointer" onclick="S.tab.ortu='absen';renderOrtu()"><span class="lbl">Hadir ${BULAN[+p.slice(5) - 1]}</span><span class="val num">${ab.length}</span><span class="sub">sesi →</span></div>
       <div class="stat bg-matcha"><span class="lbl">Paket</span><span class="val" style="font-size:16px;line-height:1.25">${esc(s.paket || '-')}</span><span class="sub">${esc(kelasLabel(s))}${s.homeVisit === 'Ya' ? ' · home visit' : ''}</span></div>
-      <div class="stat bg-yellow"><span class="lbl">Biaya les</span><span class="val num" style="font-size:20px">${rp(lg.t.tarif)}<small style="font-size:13px">/${unitBayar(lg.t)}</small></span><span class="sub">${lg.t.transport ? '+ transport ' + rp(lg.t.transport) + '/pertemuan · ' : ''}${dueTxt}</span></div>
+      <div class="stat bg-yellow"><span class="lbl">Biaya les</span><span class="val num" style="font-size:20px">${rp(lg.t.tarif)}<small style="font-size:13px">/${unitBayar(lg.t)}</small></span><span class="sub">${lg.t.transport ? '+ transport ' + rp(lg.t.transport) + '/bulan · ' : ''}${dueTxt}</span></div>
       <div class="stat bg-orange" style="cursor:pointer" onclick="S.tab.ortu='harian';renderOrtu()"><span class="lbl">Laporan</span><span class="val num">${rps.filter(r => !isSem(r)).length}</span><span class="sub">${rps.filter(r => !isSem(r))[0] ? 'terbaru ' + fmtPeriod(rps.filter(r => !isSem(r))[0].periode) : 'belum ada'} →</span></div>
     </div>
     <div class="grid g2">
@@ -3556,9 +3604,11 @@ function renderDaftarMurid() {
   const st = S.settings || {};
   regShell('Pendaftaran Murid Baru', `${esc(st.namaLembaga || 'Omah Sinau')} · Tahun Ajar ${esc(st.tahunAjaran || '')}`, `
     <div class="info-box small">Dengan mendaftar, saya bersedia mengikuti les dengan disiplin & memenuhi kewajiban.</div>
-    <form id="fReg" class="form-grid" onsubmit="event.preventDefault();kirimDaftarMurid()">
+    <form id="fReg" class="form-grid" onsubmit="event.preventDefault();kirimDaftarMurid()" onchange="if(event.target.name==='paket')regAnak()">
+      ${fld('paket', 'Paket belajar', { req: 1, select: PAKET_FORM, full: 1 })}
       ${fld('nama', 'Nama lengkap murid', { req: 1, full: 1 })}${fld('ortu', 'Nama orang tua', { req: 1 })}
-      ${fld('paket', 'Paket belajar', { req: 1, select: PAKET_FORM })}${fld('kelas', 'Kelas', { req: 1, select: KELAS_FORM })}
+      ${fld('kelas', 'Kelas', { req: 1, select: KELAS_FORM })}
+      <div class="full" id="regAnak"></div>
       ${fld('sekolah', 'Sekolah', { req: 1, ph: 'contoh: SDN 2 Sukomulyo' })}${fld('tempatLes', 'Tempat les', { req: 1, select: listOf('lokasiList') })}
       ${fld('jadwal', 'Jadwal les yang diinginkan', { req: 1, ph: 'contoh: Rabu & Kamis 17.00' })}
       ${fld('alamat', 'Alamat rumah', { req: 1, full: 1 })}
@@ -3568,6 +3618,19 @@ function renderDaftarMurid() {
       <div class="full"><button class="btn block yellow" style="padding:13px">Kirim Pendaftaran →</button></div>
     </form>`);
 }
+/* Home visit (2–4 anak) & privat bimbel khusus (2–3 anak): isi nama anak lainnya — tiap anak jadi data siswa sendiri */
+function regAnak() {
+  const f = $('#fReg'), box = $('#regAnak'), mm = paketKelompok(f.paket.value);
+  if (!mm) { box.innerHTML = ''; return; }
+  const old = [...box.querySelectorAll('.reg-anak')].map(r => ({ nama: r.querySelector('[name=anakNama]').value, kelas: r.querySelector('[name=anakKelas]').value, sekolah: r.querySelector('[name=anakSekolah]').value }));
+  const n = Math.max(mm[0] - 1, Math.min(mm[1] - 1, +box.dataset.n || mm[0] - 1)); box.dataset.n = n;
+  box.innerHTML = `<div class="info-box small" style="margin-bottom:8px">👥 Paket ini untuk <b>${mm[0]}–${mm[1]} anak</b> (kakak-adik atau tetangga). Isi juga nama anak lainnya — tiap anak dicatat sendiri supaya kehadiran & tagihannya sesuai.</div>
+    ${Array.from({ length: n }, (_, i) => { const o = old[i] || {}; return `<div class="reg-anak form-grid" style="border:1.5px dashed var(--line,#ddd);border-radius:12px;padding:10px;margin-bottom:8px">
+      <div class="field full"><label>Nama anak ke-${i + 2}${i < mm[0] - 1 ? ' *' : ''}</label><input class="input" name="anakNama" ${i < mm[0] - 1 ? 'required' : ''} value="${esc(o.nama || '')}"></div>
+      <div class="field"><label>Kelas</label><select class="input" name="anakKelas"><option value="">— pilih —</option>${KELAS_FORM.map(k => `<option ${o.kelas === k ? 'selected' : ''}>${k}</option>`).join('')}</select></div>
+      <div class="field"><label>Sekolah</label><input class="input" name="anakSekolah" value="${esc(o.sekolah || '')}"></div></div>`; }).join('')}
+    <div class="row">${n < mm[1] - 1 ? `<button type="button" class="btn sm ghost" onclick="$('#regAnak').dataset.n=${n + 1};regAnak()">${ic('plus')} Tambah anak</button>` : ''}${n > mm[0] - 1 ? `<button type="button" class="btn sm ghost" onclick="$('#regAnak').dataset.n=${n - 1};regAnak()">Kurangi</button>` : ''}</div>`;
+}
 function ambilLokasi() {
   if (!navigator.geolocation) return toast('HP tidak mendukung lokasi — tempel link dari Google Maps', true);
   toast('Mengambil lokasi…');
@@ -3576,8 +3639,12 @@ function ambilLokasi() {
 }
 async function kirimDaftarMurid() {
   const d = formData($('#fReg'));
-  try { const r = await call('daftarMurid', { data: d }); clearUrl(); S._regMsg = `Assalamu'alaikum admin, saya sudah mendaftarkan ${d.nama} (no. ${r.id}) di ${S.settings.namaLembaga || 'Omah Sinau'}.`;
-    regShell('Pendaftaran terkirim! 🎉', esc(S.settings.namaLembaga || ''), `<div class="info-box" style="text-align:center"><p>Terima kasih, data <b>${esc(d.nama)}</b> sudah kami terima.<br>No. pendaftaran: <b>${esc(r.id)}</b></p><p class="small" style="margin-top:8px">Admin akan menghubungi WhatsApp orang tua untuk konfirmasi jadwal & mengirim akses Portal Orang Tua.</p></div>
+  d.anak = [...document.querySelectorAll('#regAnak .reg-anak')].map(r => ({ nama: r.querySelector('[name=anakNama]').value.trim(), kelas: r.querySelector('[name=anakKelas]').value, sekolah: r.querySelector('[name=anakSekolah]').value.trim() })).filter(x => x.nama);
+  delete d.anakNama; delete d.anakKelas; delete d.anakSekolah;
+  const mm = paketKelompok(d.paket); if (mm && d.anak.length + 1 < mm[0]) return toast(`Paket ini minimal ${mm[0]} anak — isi nama anak lainnya`, true);
+  if (d.anak.length) d.nama = d.nama.trim();
+  try { const r = await call('daftarMurid', { data: d }); clearUrl(); S._regMsg = `Assalamu'alaikum admin, saya sudah mendaftarkan ${[d.nama].concat((d.anak || []).map(x => x.nama)).join(', ')} (no. ${r.ids ? r.ids.join(', ') : r.id}) di ${S.settings.namaLembaga || 'Omah Sinau'}.`;
+    regShell('Pendaftaran terkirim! 🎉', esc(S.settings.namaLembaga || ''), `<div class="info-box" style="text-align:center"><p>Terima kasih, data <b>${esc([d.nama].concat((d.anak || []).map(x => x.nama)).join(', '))}</b> sudah kami terima.<br>No. pendaftaran: <b>${esc(r.ids ? r.ids.join(', ') : r.id)}</b></p><p class="small" style="margin-top:8px">Admin akan menghubungi WhatsApp orang tua untuk konfirmasi jadwal & mengirim akses Portal Orang Tua.</p></div>
       <div style="text-align:center;margin-top:12px"><button class="btn wa" onclick="openWa(S.settings.noWa,S._regMsg)">${ic('wa')} Chat Admin</button></div>`);
   } catch (e) { toast(e.message, true); }
 }
